@@ -1,10 +1,10 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Intentify - API (presign, recordings, intents, transcribe (OpenAI), match (OpenAI), speak (OpenAI TTS))
+Description: Intentify - API (presign, recordings, intents, transcribe (OpenAI), match (OpenAI), speak (AWS Polly))
 
 Globals:
   Function:
-    Runtime: nodejs18.x
+    Runtime: nodejs24.x
     Timeout: 30
 
 Parameters:
@@ -34,6 +34,44 @@ Parameters:
     Default: mp3
 
 Resources:
+  # --------------------
+  # Cognito (Auth)
+  # --------------------
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      UserPoolName: intentify-userpool
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      ClientName: intentify-app-client
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+      PreventUserExistenceErrors: ENABLED
+
+  # --------------------
+  # API Gateway (Cognito protected by default)
+  # --------------------
   Api:
     Type: AWS::Serverless::Api
     Properties:
@@ -42,9 +80,20 @@ Resources:
         AllowMethods: "'OPTIONS,GET,POST,DELETE'"
         AllowHeaders: "'Content-Type,Authorization'"
         AllowOrigin: "'*'"
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        AddDefaultAuthorizerToCorsPreflight: false
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt UserPool.Arn
 
+  # --------------------
+  # DynamoDB (intent + recordings metadata)
+  # --------------------
   IntentRecordsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Ref IntentRecordsTableName
       BillingMode: PAY_PER_REQUEST
@@ -145,7 +194,7 @@ Resources:
             Method: GET
 
   # --------------------
-  # Intents (POST + GET + DELETE) + store embedding (OpenAI)
+  # Intents (POST + GET + DELETE)
   # --------------------
   IntentsFunction:
     Type: AWS::Serverless::Function
@@ -242,7 +291,7 @@ Resources:
             Method: POST
 
   # --------------------
-  # Speak (OpenAI TTS) - POST /speak
+  # Speak (AWS Polly) - POST /speak
   # --------------------
   SpeakFunction:
     Type: AWS::Serverless::Function
@@ -279,3 +328,9 @@ Outputs:
   IntentRecordsTableName:
     Description: DynamoDB table for intent + recordings metadata
     Value: !Ref IntentRecordsTable
+
+  UserPoolId:
+    Value: !Ref UserPool
+
+  UserPoolClientId:
+    Value: !Ref UserPoolClient

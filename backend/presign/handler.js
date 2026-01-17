@@ -4,17 +4,35 @@ const crypto = require("crypto");
 
 const s3 = new S3Client({});
 
+function getUserSub(event) {
+  // REST API + Cognito authorizer often injects claims here:
+  const claims = event?.requestContext?.authorizer?.claims;
+  const sub = claims?.sub;
+  return sub || null;
+}
+
 exports.handler = async (event) => {
   try {
-    const body = event.body ? JSON.parse(event.body) : {};
-    const userId = body.userId || "anon";
-    const contentType = body.contentType || "audio/m4a";
-
     const bucket = process.env.BUCKET_NAME;
     if (!bucket) throw new Error("Missing BUCKET_NAME env var");
 
+    const userSub = getUserSub(event);
+    if (!userSub) {
+      return {
+        statusCode: 401,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+        body: JSON.stringify({ error: "Unauthorized (missing user identity)" }),
+      };
+    }
+
+    const body = event.body ? JSON.parse(event.body) : {};
+    const contentType = body.contentType || "audio/m4a";
+
     const id = crypto.randomUUID();
-    const key = `users/${userId}/recordings/${Date.now()}-${id}.m4a`;
+    const key = `users/${userSub}/recordings/${Date.now()}-${id}.m4a`;
 
     const cmd = new PutObjectCommand({
       Bucket: bucket,
@@ -22,7 +40,7 @@ exports.handler = async (event) => {
       ContentType: contentType,
     });
 
-    const uploadUrl = await getSignedUrl(s3, cmd, { expiresIn: 120 }); // 2 minutes
+    const uploadUrl = await getSignedUrl(s3, cmd, { expiresIn: 120 });
 
     return {
       statusCode: 200,
@@ -33,6 +51,7 @@ exports.handler = async (event) => {
       body: JSON.stringify({ uploadUrl, key, bucket }),
     };
   } catch (err) {
+    console.error("PresignFunction error:", err);
     return {
       statusCode: 500,
       headers: {

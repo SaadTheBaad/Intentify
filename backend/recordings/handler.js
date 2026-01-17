@@ -14,32 +14,33 @@ exports.handler = async (event) => {
       return resp(500, { error: "Missing INTENT_RECORDS_TABLE env var" });
     }
 
-    const method = event.httpMethod || event.requestContext?.http?.method;
+    const userSub = getUserSub(event);
+    if (!userSub) return resp(401, { error: "Unauthorized" });
+
+    const method = (event.httpMethod || event.requestContext?.http?.method || "").toUpperCase();
 
     // -------------------------
-    // GET /recordings?deviceId=...
+    // GET /recordings
     // -------------------------
     if (method === "GET") {
-      const qs = event.queryStringParameters || {};
-      const deviceId = qs.deviceId;
-
-      if (!deviceId) {
-        return resp(400, { error: "Missing deviceId query param" });
-      }
-
-      const pk = `USER#${deviceId}`;
+      const pk = `USER#${userSub}`;
 
       const result = await ddb.send(
         new QueryCommand({
           TableName: tableName,
           KeyConditionExpression: "pk = :pk",
           ExpressionAttributeValues: { ":pk": pk },
-          ScanIndexForward: false, // newest first
+          ScanIndexForward: false,
           Limit: 50,
         })
       );
 
-      return resp(200, { ok: true, items: result.Items || [] });
+      // Only return recordings
+      const items = (result.Items || []).filter(
+        (x) => (x.entityType || "RECORDING") === "RECORDING"
+      );
+
+      return resp(200, { ok: true, items });
     }
 
     // -------------------------
@@ -50,7 +51,6 @@ exports.handler = async (event) => {
       if (!body) return resp(400, { error: "Invalid JSON body" });
 
       const {
-        deviceId,
         recordingId,
         s3Key,
         confirmedIntent,
@@ -59,24 +59,23 @@ exports.handler = async (event) => {
         transcript,
       } = body;
 
-      if (!deviceId || !recordingId || !s3Key || !confirmedIntent) {
+      if (!recordingId || !s3Key || !confirmedIntent) {
         return resp(400, {
           error:
-            "Missing required fields: deviceId, recordingId, s3Key, confirmedIntent",
+            "Missing required fields: recordingId, s3Key, confirmedIntent",
         });
       }
 
       const nowIso = new Date().toISOString();
       const createdIso = createdAt ? new Date(createdAt).toISOString() : nowIso;
 
-      const pk = `USER#${deviceId}`;
+      const pk = `USER#${userSub}`;
       const sk = `TS#${createdIso}#REC#${recordingId}`;
 
       const item = {
         pk,
         sk,
         recordingId,
-        deviceId,
         s3Key,
         confirmedIntent,
         durationSeconds:
@@ -97,7 +96,6 @@ exports.handler = async (event) => {
       return resp(200, { ok: true, pk, sk });
     }
 
-    // Unsupported method
     return resp(405, { error: `Method not allowed: ${method}` });
   } catch (err) {
     console.error("RecordingsFunction error:", err);
@@ -105,16 +103,27 @@ exports.handler = async (event) => {
   }
 };
 
+function getUserSub(event) {
+  const claims =
+    event?.requestContext?.authorizer?.claims ||
+    event?.requestContext?.authorizer?.jwt?.claims;
+  return claims?.sub || null;
+}
+
 function resp(statusCode, body) {
   return {
     statusCode,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Access-Control-Allow-Methods": "OPTIONS,GET,POST",
-    },
+    headers: corsHeaders(),
     body: JSON.stringify(body),
+  };
+}
+
+function corsHeaders() {
+  return {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type,Authorization",
+    "Access-Control-Allow-Methods": "OPTIONS,GET,POST",
   };
 }
 

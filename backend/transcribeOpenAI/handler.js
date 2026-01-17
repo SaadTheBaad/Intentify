@@ -4,11 +4,14 @@ const s3 = new S3Client({});
 
 exports.handler = async (event) => {
   try {
+    const userSub = getUserSub(event);
+    if (!userSub) return resp(401, { error: "Unauthorized" });
+
     const body = safeJson(event.body);
     if (!body) return resp(400, { error: "Invalid JSON body" });
 
-    const { deviceId, s3Key } = body;
-    if (!deviceId || !s3Key) return resp(400, { error: "deviceId and s3Key required" });
+    const { s3Key } = body;
+    if (!s3Key) return resp(400, { error: "s3Key required" });
 
     const bucket = process.env.BUCKET_NAME;
     const apiKey = process.env.OPENAI_API_KEY;
@@ -17,15 +20,17 @@ exports.handler = async (event) => {
     if (!bucket) return resp(500, { error: "Missing BUCKET_NAME" });
     if (!apiKey) return resp(500, { error: "Missing OPENAI_API_KEY" });
 
-    // 1) Download audio bytes from S3
+    // Optional but recommended: ensure users can only transcribe their own objects
+    if (!String(s3Key).startsWith(`users/${userSub}/`)) {
+      return resp(403, { error: "Forbidden (key not owned by user)" });
+    }
+
     const obj = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: s3Key }));
     const audioBuf = await streamToBuffer(obj.Body);
 
-    // 2) Call OpenAI transcription (multipart/form-data)
     const form = new FormData();
     form.append("model", model);
 
-    // Node 18 supports Blob; provide filename so OpenAI treats it as a file upload
     const blob = new Blob([audioBuf], { type: "audio/m4a" });
     form.append("file", blob, "audio.m4a");
 
@@ -53,6 +58,13 @@ exports.handler = async (event) => {
   }
 };
 
+function getUserSub(event) {
+  const claims =
+    event?.requestContext?.authorizer?.claims ||
+    event?.requestContext?.authorizer?.jwt?.claims;
+  return claims?.sub || null;
+}
+
 function resp(statusCode, body) {
   return {
     statusCode,
@@ -79,7 +91,6 @@ function safeJson(str) {
 }
 
 async function streamToBuffer(stream) {
-  // AWS SDK v3 returns a readable stream
   const chunks = [];
   for await (const chunk of stream) chunks.push(Buffer.from(chunk));
   return Buffer.concat(chunks);

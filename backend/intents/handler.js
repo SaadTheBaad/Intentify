@@ -16,11 +16,14 @@ exports.handler = async (event) => {
   try {
     if (!TABLE) return resp(500, { error: "Missing INTENT_RECORDS_TABLE" });
 
-    const method = (event.httpMethod || "").toUpperCase();
+    const userSub = getUserSub(event);
+    if (!userSub) return resp(401, { error: "Unauthorized" });
 
-    if (method === "GET") return await handleGet(event);
-    if (method === "POST") return await handlePost(event);
-    if (method === "DELETE") return await handleDelete(event);
+    const method = (event.httpMethod || event.requestContext?.http?.method || "").toUpperCase();
+
+    if (method === "GET") return await handleGet(event, userSub);
+    if (method === "POST") return await handlePost(event, userSub);
+    if (method === "DELETE") return await handleDelete(event, userSub);
 
     return resp(405, { error: `Method not allowed: ${method}` });
   } catch (err) {
@@ -29,12 +32,8 @@ exports.handler = async (event) => {
   }
 };
 
-async function handleGet(event) {
-  const qs = event.queryStringParameters || {};
-  const deviceId = qs.deviceId;
-  if (!deviceId) return resp(400, { error: "Missing deviceId query param" });
-
-  const pk = `USER#${deviceId}`;
+async function handleGet(event, userSub) {
+  const pk = `USER#${userSub}`;
 
   const out = await ddb.send(
     new QueryCommand({
@@ -45,7 +44,7 @@ async function handleGet(event) {
         ":prefix": "INTENT#",
       },
       ScanIndexForward: true,
-    }),
+    })
   );
 
   const items = (out.Items || []).map((i) => ({
@@ -58,22 +57,21 @@ async function handleGet(event) {
   return resp(200, { ok: true, items });
 }
 
-async function handlePost(event) {
+async function handlePost(event, userSub) {
   const body = safeJson(event.body);
   if (!body) return resp(400, { error: "Invalid JSON body" });
 
-  const { deviceId, intentId, label } = body;
-  if (!deviceId || !intentId || !label) {
-    return resp(400, { error: "Missing required fields: deviceId, intentId, label" });
+  const { intentId, label } = body;
+  if (!intentId || !label) {
+    return resp(400, { error: "Missing required fields: intentId, label" });
   }
 
   if (!OPENAI_KEY) return resp(500, { error: "Missing OPENAI_API_KEY" });
 
   const now = new Date().toISOString();
-  const pk = `USER#${deviceId}`;
+  const pk = `USER#${userSub}`;
   const sk = `INTENT#${intentId}`;
 
-  // Embed label once, store it
   const embedding = await embedText(label);
 
   await ddb.send(
@@ -83,36 +81,34 @@ async function handlePost(event) {
         pk,
         sk,
         entityType: "INTENT",
-        deviceId,
         intentId,
         label,
-        embedding, // float[]
+        embedding,
         createdAt: now,
         updatedAt: now,
       },
-    }),
+    })
   );
 
   return resp(200, { ok: true, intentId });
 }
 
-async function handleDelete(event) {
+async function handleDelete(event, userSub) {
   const qs = event.queryStringParameters || {};
-  const deviceId = qs.deviceId;
   const intentId = qs.intentId;
 
-  if (!deviceId || !intentId) {
-    return resp(400, { error: "Missing deviceId or intentId query param" });
+  if (!intentId) {
+    return resp(400, { error: "Missing intentId query param" });
   }
 
-  const pk = `USER#${deviceId}`;
+  const pk = `USER#${userSub}`;
   const sk = `INTENT#${intentId}`;
 
   await ddb.send(
     new DeleteCommand({
       TableName: TABLE,
       Key: { pk, sk },
-    }),
+    })
   );
 
   return resp(200, { ok: true });
@@ -139,21 +135,31 @@ async function embedText(text) {
 
   const json = await r.json();
   const vec = json?.data?.[0]?.embedding;
-
   if (!Array.isArray(vec)) throw new Error("No embedding returned");
   return vec;
+}
+
+function getUserSub(event) {
+  const claims =
+    event?.requestContext?.authorizer?.claims ||
+    event?.requestContext?.authorizer?.jwt?.claims;
+  return claims?.sub || null;
 }
 
 function resp(statusCode, body) {
   return {
     statusCode,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "Content-Type,Authorization",
-      "Access-Control-Allow-Methods": "OPTIONS,GET,POST,DELETE",
-    },
+    headers: corsHeaders(),
     body: JSON.stringify(body),
+  };
+}
+
+function corsHeaders() {
+  return {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type,Authorization",
+    "Access-Control-Allow-Methods": "OPTIONS,GET,POST,DELETE",
   };
 }
 

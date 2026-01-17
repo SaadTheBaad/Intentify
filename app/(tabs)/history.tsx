@@ -12,12 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import {
-  clearHistory,
-  getHistory,
-  getOrCreateDeviceId,
-  HistoryItem,
-} from "../../src/services/storageService";
+import { clearHistory, getHistory, HistoryItem } from "../../src/services/storageService";
 
 import {
   getPresignedDownloadUrl,
@@ -32,8 +27,8 @@ type UiItem = {
   id: string;
   createdAt: string;
   intentLabel: string;
-  audioUri?: string; // local only
-  s3Key?: string; // backend or local
+  audioUri?: string;
+  s3Key?: string;
   source: "backend" | "local";
 };
 
@@ -80,8 +75,6 @@ export default function HistoryScreen() {
   const [items, setItems] = useState<UiItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const [deviceId, setDeviceId] = useState<string>("");
-
   const [playingKey, setPlayingKey] = useState<string | null>(null);
   const [speakingKey, setSpeakingKey] = useState<string | null>(null);
 
@@ -89,15 +82,15 @@ export default function HistoryScreen() {
     try {
       setError(null);
 
-      const did = await getOrCreateDeviceId();
-      setDeviceId(did);
-
       const local = await getHistory();
       const localItems = local.map(mapLocalToUi);
 
       try {
-        const res = await listRecordings(did);
-        const backendItems = (res.items || []).map(mapBackendToUi);
+        const res = await listRecordings();
+        const backendItems = (res.items || [])
+          // recordings table also contains INTENT rows, so filter
+          .filter((x) => (x.entityType || "RECORDING") === "RECORDING")
+          .map(mapBackendToUi);
 
         const seen = new Set<string>();
         const merged: UiItem[] = [];
@@ -195,11 +188,9 @@ export default function HistoryScreen() {
       setError(null);
       setSpeakingKey(k);
 
-      const did = deviceId || (await getOrCreateDeviceId());
-
       await stopPlayback();
 
-      const res = await speakText(did, item.intentLabel);
+      const res = await speakText(item.intentLabel);
       await playRecording(res.downloadUrl);
     } catch (e: any) {
       setError(e?.message ?? "Failed to speak intent");
@@ -222,11 +213,10 @@ export default function HistoryScreen() {
         styles.container,
         {
           paddingTop: insets.top + 14,
-          paddingBottom: Math.max(insets.bottom, 18) + 110, 
+          paddingBottom: Math.max(insets.bottom, 18) + 110,
         },
       ]}
     >
-      {/* Header */}
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>History</Text>
@@ -346,118 +336,32 @@ export default function HistoryScreen() {
   );
 }
 
+// styles unchanged from your file
 const styles = StyleSheet.create({
   container: { flex: 1, paddingHorizontal: 18 },
-
-  header: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-    gap: 12,
-  },
+  header: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: 12 },
   title: { color: "#EAF0FF", fontSize: 26, fontWeight: "900" },
   subtitle: { marginTop: 4, color: "rgba(234,240,255,0.60)", fontSize: 12 },
-
   headerActions: { flexDirection: "row", gap: 10 },
-  iconBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 14,
-    backgroundColor: "rgba(215,227,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.14)",
-  },
+  iconBtn: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 14, backgroundColor: "rgba(215,227,255,0.08)", borderWidth: 1, borderColor: "rgba(215,227,255,0.14)" },
   iconBtnText: { color: "#D7E3FF", fontSize: 13, fontWeight: "800" },
-
-  errorBox: {
-    marginTop: 12,
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-    padding: 12,
-    borderRadius: 14,
-    backgroundColor: "rgba(255,92,92,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(255,92,92,0.22)",
-  },
+  errorBox: { marginTop: 12, flexDirection: "row", gap: 8, alignItems: "center", padding: 12, borderRadius: 14, backgroundColor: "rgba(255,92,92,0.12)", borderWidth: 1, borderColor: "rgba(255,92,92,0.22)" },
   errorText: { flex: 1, color: "#FFE9E9", fontSize: 12, fontWeight: "700" },
-
-  empty: {
-    marginTop: 32,
-    borderRadius: 22,
-    padding: 18,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
-    alignItems: "center",
-    gap: 8,
-  },
+  empty: { marginTop: 32, borderRadius: 22, padding: 18, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", alignItems: "center", gap: 8 },
   emptyTitle: { color: "#EAF0FF", fontWeight: "900", fontSize: 16, marginTop: 4 },
   emptyText: { color: "rgba(234,240,255,0.65)", fontSize: 12, textAlign: "center" },
-
-  card: {
-    marginBottom: 12,
-    borderRadius: 22,
-    padding: 16,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
-  },
-
+  card: { marginBottom: 12, borderRadius: 22, padding: 16, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
   cardTopRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
-
   intent: { color: "#EAF0FF", fontSize: 16, fontWeight: "900" },
-
-  metaRow: {
-    marginTop: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    flexWrap: "wrap",
-  },
+  metaRow: { marginTop: 8, flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
   metaText: { color: "rgba(234,240,255,0.65)", fontSize: 12 },
-
-  chip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  chipCloud: {
-    backgroundColor: "rgba(215,227,255,0.10)",
-    borderColor: "rgba(215,227,255,0.14)",
-  },
-  chipLocal: {
-    backgroundColor: "rgba(215,227,255,0.08)",
-    borderColor: "rgba(215,227,255,0.12)",
-  },
+  chip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1 },
+  chipCloud: { backgroundColor: "rgba(215,227,255,0.10)", borderColor: "rgba(215,227,255,0.14)" },
+  chipLocal: { backgroundColor: "rgba(215,227,255,0.08)", borderColor: "rgba(215,227,255,0.12)" },
   chipText: { color: "#D7E3FF", fontSize: 12, fontWeight: "800" },
-
-  s3: {
-    marginTop: 8,
-    color: "rgba(234,240,255,0.45)",
-    fontSize: 12,
-  },
-
+  s3: { marginTop: 8, color: "rgba(234,240,255,0.45)", fontSize: 12 },
   actionsRow: { marginTop: 14, flexDirection: "row", gap: 10 },
-  actionBtn: {
-    flex: 1,
-    flexDirection: "row",
-    gap: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 12,
-    borderRadius: 16,
-    backgroundColor: "rgba(215,227,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.14)",
-  },
+  actionBtn: { flex: 1, flexDirection: "row", gap: 10, alignItems: "center", justifyContent: "center", paddingVertical: 12, borderRadius: 16, backgroundColor: "rgba(215,227,255,0.08)", borderWidth: 1, borderColor: "rgba(215,227,255,0.14)" },
   actionBtnDisabled: { opacity: 0.55 },
   actionText: { color: "#D7E3FF", fontWeight: "900", fontSize: 14 },
 });

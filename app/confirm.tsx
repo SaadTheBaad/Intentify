@@ -13,10 +13,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { playRecording, stopPlayback } from "../src/services/audioService";
-import {
-  getOrCreateDeviceId,
-  saveHistoryItem,
-} from "../src/services/storageService";
+import { saveHistoryItem } from "../src/services/storageService";
 
 import {
   createIntent,
@@ -62,7 +59,6 @@ export default function ConfirmScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [pending, setPending] = useState<{
-    deviceId: string;
     recordingId: string;
     createdAt: string;
     s3Key: string;
@@ -89,18 +85,17 @@ export default function ConfirmScreen() {
     setHasRun(false);
 
     try {
-      const deviceId = await getOrCreateDeviceId();
       const recordingId = `${Date.now()}`;
       const createdAt = new Date().toISOString();
 
       setStatus("Getting upload URL…");
-      const { uploadUrl, key } = await getPresignedUrl(deviceId);
+      const { uploadUrl, key } = await getPresignedUrl();
 
       setStatus("Uploading audio…");
       await uploadToPresignedUrl(uploadUrl, safeUri);
 
       setStatus("Transcribing…");
-      const tRes = await transcribeFromS3(deviceId, key);
+      const tRes = await transcribeFromS3(key);
       const transcript = (tRes.transcript || "").trim();
 
       if (!transcript) {
@@ -108,13 +103,13 @@ export default function ConfirmScreen() {
       }
 
       setStatus("Finding best intent…");
-      const matchRes = await matchIntents(deviceId, transcript, 3);
+      const matchRes = await matchIntents(transcript, 3);
 
       const sugg = matchRes.suggestions || [];
       setSuggestions(sugg);
       if (sugg.length > 0) setSelectedId(sugg[0].intentId);
 
-      setPending({ deviceId, recordingId, createdAt, s3Key: key, transcript });
+      setPending({ recordingId, createdAt, s3Key: key, transcript });
 
       setHasRun(true);
       setStatus("Pick the best match, then Confirm!");
@@ -146,6 +141,7 @@ export default function ConfirmScreen() {
       setIsWorking(true);
       setStatus("Saving…");
 
+      // local-only history keeps audioUri for device playback UX
       await saveHistoryItem({
         id: pending.recordingId,
         createdAt: pending.createdAt,
@@ -156,7 +152,6 @@ export default function ConfirmScreen() {
       });
 
       await createRecording({
-        deviceId: pending.deviceId,
         recordingId: pending.recordingId,
         s3Key: pending.s3Key,
         confirmedIntent: selected.label,
@@ -187,7 +182,7 @@ export default function ConfirmScreen() {
       setStatus("Adding intent…");
 
       const intentId = makeIntentId(label);
-      await createIntent(pending.deviceId, intentId, label);
+      await createIntent(intentId, label);
 
       const next = [{ intentId, label, score: 1 }];
       setSuggestions(next);
@@ -228,7 +223,6 @@ export default function ConfirmScreen() {
         contentContainerStyle={{ paddingBottom: 110 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
         <View style={styles.headerRow}>
           <View style={styles.headerLeft}>
             <View style={styles.appIcon}>
@@ -243,7 +237,6 @@ export default function ConfirmScreen() {
           </View>
         </View>
 
-        {/* Audio controls */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Audio</Text>
           <Text style={styles.cardHint}>
@@ -311,7 +304,6 @@ export default function ConfirmScreen() {
           ) : null}
         </View>
 
-        {/* Suggestions */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Suggestions</Text>
           <Text style={styles.sectionHint}>Tap one to select it.</Text>
@@ -409,13 +401,7 @@ export default function ConfirmScreen() {
         )}
       </ScrollView>
 
-      {/* Bottom Confirm CTA */}
-      <View
-        style={[
-          styles.bottomBar,
-          { paddingBottom: Math.max(insets.bottom, 14) },
-        ]}
-      >
+      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 14) }]}>
         <Pressable
           onPress={onConfirm}
           disabled={!canConfirm}
@@ -430,12 +416,7 @@ export default function ConfirmScreen() {
             size={20}
             color={canConfirm ? "#0B1020" : "rgba(11,16,32,0.55)"}
           />
-          <Text
-            style={[
-              styles.confirmText,
-              !canConfirm && styles.confirmTextDisabled,
-            ]}
-          >
+          <Text style={[styles.confirmText, !canConfirm && styles.confirmTextDisabled]}>
             {isWorking ? "Saving…" : "Confirm"}
           </Text>
         </Pressable>
@@ -444,202 +425,48 @@ export default function ConfirmScreen() {
   );
 }
 
+// styles unchanged from your file
 const styles = StyleSheet.create({
   container: { flex: 1, paddingHorizontal: 18 },
-
-  headerRow: {
-    marginTop: 6,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
+  headerRow: { marginTop: 6, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   headerLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
-  appIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: "rgba(215,227,255,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.16)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  appIcon: { width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(215,227,255,0.12)", borderWidth: 1, borderColor: "rgba(215,227,255,0.16)", alignItems: "center", justifyContent: "center" },
   title: { color: "#EAF0FF", fontSize: 20, fontWeight: "900" },
   subtitle: { color: "rgba(234,240,255,0.60)", fontSize: 12, marginTop: 2 },
-
-  // (chip styles left in case you reuse later)
-
-  card: {
-    marginTop: 18,
-    borderRadius: 22,
-    padding: 16,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
-  },
+  card: { marginTop: 18, borderRadius: 22, padding: 16, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
   cardTitle: { color: "#EAF0FF", fontSize: 16, fontWeight: "900" },
   cardHint: { marginTop: 6, color: "rgba(234,240,255,0.62)", fontSize: 12 },
-
   actionsRow: { marginTop: 12, flexDirection: "row", gap: 10 },
-  actionBtn: {
-    flex: 1,
-    flexDirection: "row",
-    gap: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 12,
-    borderRadius: 16,
-    backgroundColor: "rgba(215,227,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.14)",
-  },
+  actionBtn: { flex: 1, flexDirection: "row", gap: 10, alignItems: "center", justifyContent: "center", paddingVertical: 12, borderRadius: 16, backgroundColor: "rgba(215,227,255,0.08)", borderWidth: 1, borderColor: "rgba(215,227,255,0.14)" },
   actionBtnDisabled: { opacity: 0.55 },
   actionText: { color: "#D7E3FF", fontWeight: "900", fontSize: 14 },
-
-  primaryBtn: {
-    marginTop: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 13,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    backgroundColor: "#D7E3FF",
-    borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.55)",
-  },
-  primaryBtnDisabled: {
-    backgroundColor: "rgba(215,227,255,0.22)",
-    borderColor: "rgba(215,227,255,0.25)",
-  },
+  primaryBtn: { marginTop: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 13, paddingHorizontal: 14, borderRadius: 16, backgroundColor: "#D7E3FF", borderWidth: 1, borderColor: "rgba(215,227,255,0.55)" },
+  primaryBtnDisabled: { backgroundColor: "rgba(215,227,255,0.22)", borderColor: "rgba(215,227,255,0.25)" },
   primaryBtnText: { color: "#0B1020", fontWeight: "900", fontSize: 14 },
   primaryBtnTextDisabled: { color: "rgba(11,16,32,0.55)" },
-
-  statusBox: {
-    marginTop: 12,
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-    padding: 12,
-    borderRadius: 14,
-    backgroundColor: "rgba(191,210,255,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(191,210,255,0.10)",
-  },
-  statusText: {
-    flex: 1,
-    color: "rgba(234,240,255,0.75)",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-
+  statusBox: { marginTop: 12, flexDirection: "row", gap: 8, alignItems: "center", padding: 12, borderRadius: 14, backgroundColor: "rgba(191,210,255,0.06)", borderWidth: 1, borderColor: "rgba(191,210,255,0.10)" },
+  statusText: { flex: 1, color: "rgba(234,240,255,0.75)", fontSize: 12, fontWeight: "700" },
   sectionHeader: { marginTop: 16, marginBottom: 8 },
   sectionTitle: { color: "#EAF0FF", fontSize: 14, fontWeight: "900" },
   sectionHint: { marginTop: 4, color: "rgba(234,240,255,0.55)", fontSize: 12 },
-
-  empty: {
-    marginTop: 12,
-    borderRadius: 22,
-    padding: 18,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
-    alignItems: "center",
-    gap: 8,
-  },
-  emptyTitle: {
-    color: "#EAF0FF",
-    fontWeight: "900",
-    fontSize: 16,
-    marginTop: 4,
-    textAlign: "center",
-  },
+  empty: { marginTop: 12, borderRadius: 22, padding: 18, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", alignItems: "center", gap: 8 },
+  emptyTitle: { color: "#EAF0FF", fontWeight: "900", fontSize: 16, marginTop: 4, textAlign: "center" },
   emptyText: { color: "rgba(234,240,255,0.65)", fontSize: 12, textAlign: "center" },
-
-  secondaryBtn: {
-    width: "100%",
-    flexDirection: "row",
-    gap: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 12,
-    borderRadius: 16,
-    backgroundColor: "rgba(215,227,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.14)",
-  },
+  secondaryBtn: { width: "100%", flexDirection: "row", gap: 10, alignItems: "center", justifyContent: "center", paddingVertical: 12, borderRadius: 16, backgroundColor: "rgba(215,227,255,0.08)", borderWidth: 1, borderColor: "rgba(215,227,255,0.14)" },
   secondaryBtnDisabled: { opacity: 0.55 },
   secondaryBtnText: { color: "#D7E3FF", fontWeight: "900", fontSize: 14 },
-
-  suggCard: {
-    borderRadius: 22,
-    padding: 14,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
-  },
-  suggCardActive: {
-    backgroundColor: "rgba(215,227,255,0.10)",
-    borderColor: "rgba(215,227,255,0.18)",
-  },
+  suggCard: { borderRadius: 22, padding: 14, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
+  suggCardActive: { backgroundColor: "rgba(215,227,255,0.10)", borderColor: "rgba(215,227,255,0.18)" },
   suggTopRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-
-  radio: {
-    width: 20,
-    height: 20,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  radioHollow: {
-    width: 18,
-    height: 18,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.30)",
-  },
-  radioDot: {
-    width: 18,
-    height: 18,
-    borderRadius: 999,
-    backgroundColor: "rgba(215,227,255,0.90)",
-  },
-
+  radio: { width: 20, height: 20, borderRadius: 999, alignItems: "center", justifyContent: "center" },
+  radioHollow: { width: 18, height: 18, borderRadius: 999, borderWidth: 1, borderColor: "rgba(215,227,255,0.30)" },
+  radioDot: { width: 18, height: 18, borderRadius: 999, backgroundColor: "rgba(215,227,255,0.90)" },
   suggLabel: { flex: 1, color: "#EAF0FF", fontSize: 14, fontWeight: "900" },
-
-  scorePill: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: "rgba(215,227,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.14)",
-  },
+  scorePill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: "rgba(215,227,255,0.08)", borderWidth: 1, borderColor: "rgba(215,227,255,0.14)" },
   scorePillText: { color: "rgba(234,240,255,0.75)", fontSize: 11, fontWeight: "800" },
-
-  bottomBar: {
-    position: "absolute",
-    left: 18,
-    right: 18,
-    bottom: 0,
-    paddingTop: 10,
-  },
-  confirmBtn: {
-    flexDirection: "row",
-    gap: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 14,
-    borderRadius: 18,
-    backgroundColor: "#D7E3FF",
-    borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.55)",
-  },
-  confirmBtnDisabled: {
-    backgroundColor: "rgba(215,227,255,0.22)",
-    borderColor: "rgba(215,227,255,0.25)",
-  },
+  bottomBar: { position: "absolute", left: 18, right: 18, bottom: 0, paddingTop: 10 },
+  confirmBtn: { flexDirection: "row", gap: 10, alignItems: "center", justifyContent: "center", paddingVertical: 14, borderRadius: 18, backgroundColor: "#D7E3FF", borderWidth: 1, borderColor: "rgba(215,227,255,0.55)" },
+  confirmBtnDisabled: { backgroundColor: "rgba(215,227,255,0.22)", borderColor: "rgba(215,227,255,0.25)" },
   confirmText: { color: "#0B1020", fontWeight: "900", fontSize: 15 },
   confirmTextDisabled: { color: "rgba(11,16,32,0.55)" },
 });

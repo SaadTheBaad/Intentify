@@ -9,18 +9,21 @@ const EMBED_MODEL = process.env.OPENAI_EMBED_MODEL || "text-embedding-3-small";
 
 exports.handler = async (event) => {
   try {
+    const userSub = getUserSub(event);
+    if (!userSub) return resp(401, { error: "Unauthorized" });
+
     const body = safeJson(event.body);
     if (!body) return resp(400, { error: "Invalid JSON body" });
 
-    const { deviceId, transcript, topK } = body;
-    if (!deviceId || !transcript) {
-      return resp(400, { error: "deviceId and transcript required" });
+    const { transcript, topK } = body;
+    if (!transcript) {
+      return resp(400, { error: "transcript required" });
     }
 
     if (!TABLE) return resp(500, { error: "Missing INTENT_RECORDS_TABLE" });
     if (!OPENAI_KEY) return resp(500, { error: "Missing OPENAI_API_KEY" });
 
-    const intents = await listIntents(deviceId);
+    const intents = await listIntents(userSub);
     if (intents.length === 0) return resp(200, { ok: true, suggestions: [] });
 
     const tVec = await embedText(transcript);
@@ -43,8 +46,8 @@ exports.handler = async (event) => {
   }
 };
 
-async function listIntents(deviceId) {
-  const pk = `USER#${deviceId}`;
+async function listIntents(userSub) {
+  const pk = `USER#${userSub}`;
   const out = await ddb.send(
     new QueryCommand({
       TableName: TABLE,
@@ -53,7 +56,7 @@ async function listIntents(deviceId) {
         ":pk": pk,
         ":p": "INTENT#",
       },
-    }),
+    })
   );
 
   return (out.Items || [])
@@ -92,15 +95,20 @@ async function embedText(text) {
 
 function cosineSimilarity(a, b) {
   const n = Math.min(a.length, b.length);
-  let dot = 0,
-    na = 0,
-    nb = 0;
+  let dot = 0, na = 0, nb = 0;
   for (let i = 0; i < n; i++) {
     dot += a[i] * b[i];
     na += a[i] * a[i];
     nb += b[i] * b[i];
   }
   return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-12);
+}
+
+function getUserSub(event) {
+  const claims =
+    event?.requestContext?.authorizer?.claims ||
+    event?.requestContext?.authorizer?.jwt?.claims;
+  return claims?.sub || null;
 }
 
 function resp(statusCode, body) {
