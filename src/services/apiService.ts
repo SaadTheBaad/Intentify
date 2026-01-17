@@ -168,20 +168,18 @@ export async function deleteIntent(deviceId: string, intentId: string) {
 // --------------------
 // Speech (TTS)
 // --------------------
-export async function speakText(
-  deviceId: string,
-  text: string,
-  voiceId?: string,
-) {
+export async function speakText(deviceId: string, text: string) {
   const res = await fetch(`${API_BASE}/speak`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ deviceId, text, voiceId }),
+    body: JSON.stringify({ deviceId, text }),
   });
+
   if (!res.ok) {
     const textRes = await res.text();
     throw new Error(`speak failed: ${res.status} ${textRes}`);
   }
+
   return (await res.json()) as {
     ok: true;
     key: string;

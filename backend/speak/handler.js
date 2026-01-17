@@ -1,44 +1,43 @@
-const {
-  PollyClient,
-  SynthesizeSpeechCommand,
-} = require("@aws-sdk/client-polly");
-const {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-} = require("@aws-sdk/client-s3");
+const { PollyClient, SynthesizeSpeechCommand } = require("@aws-sdk/client-polly");
+const { S3Client, PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const polly = new PollyClient({});
 const s3 = new S3Client({});
+
+const VOICE_ID = "Joanna";
 
 exports.handler = async (event) => {
   try {
     const bucket = process.env.BUCKET_NAME;
     if (!bucket) return resp(500, { error: "Missing BUCKET_NAME" });
 
+    // Preflight
+    if ((event.httpMethod || "").toUpperCase() === "OPTIONS") {
+      return resp(200, { ok: true });
+    }
+
     const body = safeJson(event.body);
     if (!body) return resp(400, { error: "Invalid JSON body" });
 
-    const { deviceId, text, voiceId } = body;
+    const { deviceId, text } = body;
     if (!deviceId || !text) {
       return resp(400, { error: "Missing required fields: deviceId, text" });
     }
 
-    const nowIso = new Date().toISOString();
-    const safeText = String(text).slice(0, 1200); // Polly limit safety
-    const voice = voiceId || "Joanna";
+    const safeText = String(text).slice(0, 1200);
+    const now = new Date().toISOString().replace(/[:.]/g, "-");
+    const key = `tts/${deviceId}/${now}.mp3`;
 
     const synth = await polly.send(
       new SynthesizeSpeechCommand({
         OutputFormat: "mp3",
         Text: safeText,
-        VoiceId: voice,
+        VoiceId: VOICE_ID,
       }),
     );
 
     const audioBytes = await streamToBuffer(synth.AudioStream);
-    const key = `tts/${deviceId}/${nowIso}.mp3`;
 
     await s3.send(
       new PutObjectCommand({
@@ -49,14 +48,18 @@ exports.handler = async (event) => {
       }),
     );
 
-    // Return a short-lived URL for playback
     const downloadUrl = await getSignedUrl(
       s3,
       new GetObjectCommand({ Bucket: bucket, Key: key }),
       { expiresIn: 60 },
     );
 
-    return resp(200, { ok: true, key, downloadUrl, voiceId: voice });
+    return resp(200, {
+      ok: true,
+      key,
+      downloadUrl,
+      voiceId: VOICE_ID,
+    });
   } catch (err) {
     console.error("SpeakFunction error:", err);
     return resp(500, { error: "Server error" });

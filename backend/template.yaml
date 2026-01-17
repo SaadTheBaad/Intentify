@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Intentify - API (presign, recordings, intents, transcribe (OpenAI), match (OpenAI))
+Description: Intentify - API (presign, recordings, intents, transcribe (OpenAI), match (OpenAI), speak (OpenAI TTS))
 
 Globals:
   Function:
@@ -24,6 +24,14 @@ Parameters:
   OpenAIEmbedModel:
     Type: String
     Default: text-embedding-3-small
+
+  OpenAITtsModel:
+    Type: String
+    Default: gpt-4o-mini-tts
+
+  OpenAITtsFormat:
+    Type: String
+    Default: mp3
 
 Resources:
   Api:
@@ -231,6 +239,37 @@ Resources:
           Properties:
             RestApiId: !Ref Api
             Path: /match
+            Method: POST
+
+  # --------------------
+  # Speak (OpenAI TTS) - POST /speak
+  # --------------------
+  SpeakFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: speak/
+      Handler: handler.handler
+      Environment:
+        Variables:
+          BUCKET_NAME: intentbridge-audio-2026
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - polly:SynthesizeSpeech
+              Resource: "*"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+              Resource: arn:aws:s3:::intentbridge-audio-2026/*
+      Events:
+        SpeakRoute:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /speak
             Method: POST
 
 Outputs:
