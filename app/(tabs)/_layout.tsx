@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { BlurView } from "expo-blur";
 import { Tabs } from "expo-router";
@@ -138,7 +139,10 @@ function TabItem({
         />
 
         {/* Label */}
-        <Text style={[styles.label, { color: textColor }]}>{label}</Text>
+        <View style={styles.labelRow}>
+          <Ionicons name={iconName} size={18} color={iconColor} />
+          <Text style={[styles.label, { color: textColor }]}>{label}</Text>
+        </View>
       </Animated.View>
     </Pressable>
   );
@@ -213,6 +217,11 @@ const styles = StyleSheet.create({
     position: "relative",
     alignItems: "center",
     justifyContent: "center",
+  },
+  labelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
   label: {
     fontSize: 11,
