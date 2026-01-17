@@ -1,0 +1,45 @@
+
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Intentify - presign upload URL API
+
+Globals:
+  Function:
+    Runtime: nodejs18.x
+    Timeout: 10
+
+Resources:
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Cors:
+        AllowMethods: "'OPTIONS,POST'"
+        AllowHeaders: "'Content-Type'"
+        AllowOrigin: "'*'"
+
+  PresignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: presign/
+      Handler: handler.handler
+      Environment:
+        Variables:
+          BUCKET_NAME: intentbridge-audio-2026
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource: arn:aws:s3:::intentbridge-audio-2026/*
+      Events:
+        PresignRoute:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /presign
+            Method: POST
+
+Outputs:
+  ApiBaseUrl:
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/prod"
