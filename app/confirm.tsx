@@ -9,6 +9,7 @@ import {
 } from "../src/services/storageService";
 
 import {
+  createIntent,
   createRecording,
   getPresignedUrl,
   matchIntents,
@@ -19,12 +20,24 @@ import { uploadToPresignedUrl } from "../src/services/s3UploadService";
 
 type Suggestion = { intentId: string; label: string; score: number };
 
+function makeIntentId(label: string) {
+  return (
+    label
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "")
+      .slice(0, 50) || `intent-${Date.now()}`
+  );
+}
+
 export default function ConfirmScreen() {
   const { uri } = useLocalSearchParams<{ uri?: string }>();
   const safeUri = useMemo(() => (typeof uri === "string" ? uri : null), [uri]);
 
   const [status, setStatus] = useState<string | null>(null);
   const [isWorking, setIsWorking] = useState(false);
+  const [hasRun, setHasRun] = useState(false);
 
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -55,6 +68,7 @@ export default function ConfirmScreen() {
     setSuggestions([]);
     setSelectedId(null);
     setPending(null);
+    setHasRun(false);
 
     try {
       const deviceId = await getOrCreateDeviceId();
@@ -89,6 +103,7 @@ export default function ConfirmScreen() {
       // 5) Store pending for Confirm step
       setPending({ deviceId, recordingId, createdAt, s3Key: key, transcript });
 
+      setHasRun(true);
       setStatus("Pick the best match, then Confirm ✅");
     } finally {
       setIsWorking(false);
@@ -148,6 +163,33 @@ export default function ConfirmScreen() {
     }
   };
 
+  const onAddFromTranscript = async () => {
+    if (!pending) return;
+    const label = pending.transcript.trim();
+    if (!label) {
+      Alert.alert("No transcript", "Record again to generate a transcript.");
+      return;
+    }
+
+    try {
+      setIsWorking(true);
+      setStatus("Adding intent...");
+
+      const intentId = makeIntentId(label);
+      await createIntent(pending.deviceId, intentId, label);
+
+      const next = [{ intentId, label, score: 1 }];
+      setSuggestions(next);
+      setSelectedId(intentId);
+      setStatus("Intent added. Review and Confirm ✅");
+    } catch (e: any) {
+      Alert.alert("Add failed", e?.message ?? "Unknown error");
+      setStatus(null);
+    } finally {
+      setIsWorking(false);
+    }
+  };
+
   const canGenerate = !!safeUri && !isWorking;
   const canConfirm = !!pending && !!selectedId && !isWorking;
 
@@ -201,9 +243,44 @@ export default function ConfirmScreen() {
       <Text style={{ marginTop: 10, fontWeight: "600" }}>Suggestions</Text>
 
       {suggestions.length === 0 ? (
-        <Text style={{ opacity: 0.7 }}>
-          No suggestions yet. Press “Generate Suggestions (AI)”.
-        </Text>
+        <>
+          <Text style={{ opacity: 0.7 }}>
+            {hasRun
+              ? "No intents exist for this device yet."
+              : "No suggestions yet. Press “Generate Suggestions (AI)”."}
+          </Text>
+          {hasRun ? (
+            <View style={{ marginTop: 10, gap: 10 }}>
+              <Pressable
+                onPress={onAddFromTranscript}
+                disabled={!pending || isWorking}
+                style={{
+                  padding: 12,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  alignItems: "center",
+                  opacity: !pending || isWorking ? 0.5 : 1,
+                }}
+              >
+                <Text style={{ fontWeight: "600" }}>Add Transcript as Intent</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => router.push("/(tabs)/intents")}
+                disabled={isWorking}
+                style={{
+                  padding: 12,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  alignItems: "center",
+                  opacity: isWorking ? 0.5 : 1,
+                }}
+              >
+                <Text style={{ fontWeight: "600" }}>Go to Intents</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </>
       ) : (
         suggestions.map((s) => {
           const active = s.intentId === selectedId;
