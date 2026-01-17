@@ -7,14 +7,14 @@ const s3 = new S3Client({});
 exports.handler = async (event) => {
   try {
     const body = event.body ? JSON.parse(event.body) : {};
-    const userId = body.userId || "anon";
+    const deviceId = body.deviceId || "anon";
     const contentType = body.contentType || "audio/m4a";
 
     const bucket = process.env.BUCKET_NAME;
     if (!bucket) throw new Error("Missing BUCKET_NAME env var");
 
     const id = crypto.randomUUID();
-    const key = `users/${userId}/recordings/${Date.now()}-${id}.m4a`;
+    const key = `devices/${deviceId}/recordings/${Date.now()}-${id}.m4a`;
 
     const cmd = new PutObjectCommand({
       Bucket: bucket,

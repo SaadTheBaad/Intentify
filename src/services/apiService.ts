@@ -4,11 +4,11 @@ const API_BASE =
 // --------------------
 // Presign
 // --------------------
-export async function getPresignedUrl(userId: string) {
+export async function getPresignedUrl(deviceId: string) {
   const res = await fetch(`${API_BASE}/presign`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userId, contentType: "audio/m4a" }),
+    body: JSON.stringify({ deviceId, contentType: "audio/m4a" }),
   });
 
   if (!res.ok) {
@@ -189,7 +189,6 @@ export async function speakText(deviceId: string, text: string) {
 }
 
 // --------------------
-// ✅ NEW: OpenAI Transcribe (single call)
 // Backend should implement POST /transcribe { deviceId, s3Key } -> { transcript }
 // --------------------
 export async function transcribeFromS3(deviceId: string, s3Key: string) {
@@ -232,4 +231,30 @@ export async function matchIntents(
   }
 
   return (await res.json()) as MatchResponse;
+}
+
+// --------------------
+// AI Suggest Intent (when no matches or low scores)
+// --------------------
+export type SuggestIntentResponse = {
+  ok: true;
+  suggestion: {
+    label: string;
+    confidence: string;
+  };
+};
+
+export async function suggestIntent(transcript: string) {
+  const res = await fetch(`${API_BASE}/suggest-intent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transcript }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`suggest-intent failed: ${res.status} ${text}`);
+  }
+
+  return (await res.json()) as SuggestIntentResponse;
 }

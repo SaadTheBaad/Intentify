@@ -1,0 +1,9 @@
+{
+  "name": "suggestIntent",
+  "version": "1.0.0",
+  "main": "handler.js",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.679.0",
+    "@aws-sdk/lib-dynamodb": "^3.679.0"
+  }
+}

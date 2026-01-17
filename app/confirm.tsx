@@ -23,12 +23,18 @@ import {
   createRecording,
   getPresignedUrl,
   matchIntents,
+  suggestIntent,
   transcribeFromS3,
 } from "../src/services/apiService";
 
 import { uploadToPresignedUrl } from "../src/services/s3UploadService";
 
-type Suggestion = { intentId: string; label: string; score: number };
+type Suggestion = { 
+  intentId: string; 
+  label: string; 
+  score: number;
+  isAi?: boolean;
+};
 
 function makeIntentId(label: string) {
   return (
@@ -111,13 +117,39 @@ export default function ConfirmScreen() {
       const matchRes = await matchIntents(deviceId, transcript, 3);
 
       const sugg = matchRes.suggestions || [];
-      setSuggestions(sugg);
-      if (sugg.length > 0) setSelectedId(sugg[0].intentId);
+      const LOW_SCORE_THRESHOLD = 0.35;
+      
+      // Check if we need AI suggestion: no matches or all scores too low
+      const needsAiSuggestion = 
+        sugg.length === 0 || 
+        sugg.every(s => s.score < LOW_SCORE_THRESHOLD);
+
+      if (needsAiSuggestion) {
+        setStatus("Generating AI suggestion…");
+        const aiRes = await suggestIntent(transcript);
+        
+        // Create a synthetic suggestion with the AI-generated intent
+        const aiIntentId = `ai-suggestion-${Date.now()}`;
+        const aiSuggestions: Suggestion[] = [{
+          intentId: aiIntentId,
+          label: aiRes.suggestion.label,
+          score: 0,
+          isAi: true
+        }];
+        
+        setSuggestions(aiSuggestions);
+        setSelectedId(aiIntentId);
+      } else {
+        setSuggestions(sugg);
+        if (sugg.length > 0) setSelectedId(sugg[0].intentId);
+      }
 
       setPending({ deviceId, recordingId, createdAt, s3Key: key, transcript });
 
       setHasRun(true);
-      setStatus("Pick the best match, then Confirm!");
+      setStatus(needsAiSuggestion 
+        ? "AI suggested an intent for you. Review and Confirm!" 
+        : "Pick the best match, then Confirm!");
     } finally {
       setIsWorking(false);
     }
@@ -146,11 +178,34 @@ export default function ConfirmScreen() {
       setIsWorking(true);
       setStatus("Saving…");
 
+      // If this is an AI-generated suggestion, create it as a new intent first
+      let finalIntentId = selected.intentId;
+      if (selected.isAi) {
+        const newIntentId = makeIntentId(selected.label);
+        
+        // Check if this intent already exists (avoid duplicates)
+        const existingMatch = suggestions.find(
+          s => !s.isAi && makeIntentId(s.label) === newIntentId
+        );
+        
+        if (!existingMatch) {
+          setStatus("Adding AI-suggested intent…");
+          await createIntent(pending.deviceId, newIntentId, selected.label);
+        } else {
+          // Use the existing intent ID instead
+          finalIntentId = existingMatch.intentId;
+        }
+        
+        if (!existingMatch) {
+          finalIntentId = newIntentId;
+        }
+      }
+
       await saveHistoryItem({
         id: pending.recordingId,
         createdAt: pending.createdAt,
         audioUri: safeUri || "",
-        intentId: selected.intentId,
+        intentId: finalIntentId,
         intentLabel: selected.label,
         s3Key: pending.s3Key,
       });
@@ -369,7 +424,7 @@ export default function ConfirmScreen() {
           <View style={{ gap: 12 }}>
             {suggestions.map((s) => {
               const active = s.intentId === selectedId;
-              const strength = scoreLabel(s.score);
+              const strength = s.isAi ? "AI" : scoreLabel(s.score);
 
               return (
                 <Pressable
@@ -379,6 +434,7 @@ export default function ConfirmScreen() {
                   style={({ pressed }) => [
                     styles.suggCard,
                     active && styles.suggCardActive,
+                    s.isAi && styles.suggCardAi,
                     isWorking && { opacity: 0.6 },
                     pressed && !isWorking && { opacity: 0.92 },
                   ]}
@@ -396,10 +452,17 @@ export default function ConfirmScreen() {
                       {s.label}
                     </Text>
 
-                    <View style={styles.scorePill}>
-                      <Text style={styles.scorePillText}>
-                        {strength} • {s.score.toFixed(3)}
-                      </Text>
+                    <View style={[styles.scorePill, s.isAi && styles.scorePillAi]}>
+                      {s.isAi ? (
+                        <>
+                          <Ionicons name="sparkles" size={11} color="#D7E3FF" />
+                          <Text style={styles.scorePillText}>AI Suggested</Text>
+                        </>
+                      ) : (
+                        <Text style={styles.scorePillText}>
+                          {strength} • {s.score.toFixed(3)}
+                        </Text>
+                      )}
                     </View>
                   </View>
                 </Pressable>
@@ -583,6 +646,10 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(215,227,255,0.10)",
     borderColor: "rgba(215,227,255,0.18)",
   },
+  suggCardAi: {
+    backgroundColor: "rgba(147,112,219,0.08)",
+    borderColor: "rgba(147,112,219,0.20)",
+  },
   suggTopRow: { flexDirection: "row", alignItems: "center", gap: 10 },
 
   radio: {
@@ -615,6 +682,13 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(215,227,255,0.08)",
     borderWidth: 1,
     borderColor: "rgba(215,227,255,0.14)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  scorePillAi: {
+    backgroundColor: "rgba(147,112,219,0.15)",
+    borderColor: "rgba(147,112,219,0.30)",
   },
   scorePillText: { color: "rgba(234,240,255,0.75)", fontSize: 11, fontWeight: "800" },
 
