@@ -21,9 +21,7 @@ export default function ConfirmScreen() {
   const { uri } = useLocalSearchParams<{ uri?: string }>();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
-  const [uploadedKey, setUploadedKey] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
 
   const safeUri = useMemo(() => (typeof uri === "string" ? uri : null), [uri]);
@@ -37,28 +35,6 @@ export default function ConfirmScreen() {
     await stopPlayback();
   };
 
-  const onUploadToS3 = async () => {
-    if (!safeUri) return;
-
-    try {
-      setIsUploading(true);
-      setUploadStatus("Getting upload URL...");
-
-      const deviceId = await getOrCreateDeviceId();
-      const { uploadUrl, key } = await getPresignedUrl(deviceId);
-
-      setUploadStatus("Uploading to S3...");
-      await uploadToPresignedUrl(uploadUrl, safeUri);
-
-      setUploadedKey(key);
-      setUploadStatus(`Uploaded ✅\nS3 key:\n${key}`);
-    } catch (e: any) {
-      setUploadStatus(`Upload failed: ${e?.message ?? "unknown error"}`);
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
   const onConfirm = async () => {
     if (!safeUri || !selectedId) return;
 
@@ -67,50 +43,53 @@ export default function ConfirmScreen() {
 
     try {
       setIsConfirming(true);
+      setStatus(null);
 
       const deviceId = await getOrCreateDeviceId();
       const recordingId = `${Date.now()}`;
       const createdAt = new Date().toISOString();
 
-      // 1) Always save locally (offline-safe)
+      // 1) Get presigned PUT URL
+      setStatus("Getting upload URL...");
+      const { uploadUrl, key } = await getPresignedUrl(deviceId);
+
+      // 2) Upload audio to S3
+      setStatus("Uploading audio...");
+      await uploadToPresignedUrl(uploadUrl, safeUri);
+
+      // 3) Save locally (offline-friendly cache)
+      setStatus("Saving locally...");
       await saveHistoryItem({
         id: recordingId,
         createdAt,
         audioUri: safeUri,
         intentId: selected.id,
         intentLabel: selected.label,
-        s3Key: uploadedKey ?? undefined,
+        s3Key: key,
       });
 
-      // 2) If uploaded to S3, also save to DynamoDB
-      if (uploadedKey) {
-        await createRecording({
-          deviceId,
-          recordingId,
-          s3Key: uploadedKey,
-          confirmedIntent: selected.label,
-          createdAt,
-          // durationSeconds: (optional) add later if you track it
-        });
-      } else {
-        // Not blocking, but helpful UX
-        // You can remove this if you want silent local-only behavior.
-        Alert.alert(
-          "Saved locally",
-          "You confirmed an intent, but it wasn’t uploaded to S3 yet. History will still show locally.",
-        );
-      }
+      // 4) Save to DynamoDB
+      setStatus("Saving to cloud...");
+      await createRecording({
+        deviceId,
+        recordingId,
+        s3Key: key,
+        confirmedIntent: selected.label,
+        createdAt,
+        // durationSeconds: add later if you track it
+      });
 
+      setStatus("Done ✅");
       router.replace("/(tabs)/history");
     } catch (e: any) {
       Alert.alert("Confirm failed", e?.message ?? "Unknown error");
+      setStatus(null);
     } finally {
       setIsConfirming(false);
     }
   };
 
-  const canConfirm = !!selectedId;
-  const canUpload = !!safeUri && !isUploading;
+  const canConfirm = !!selectedId && !!safeUri && !isConfirming;
 
   return (
     <View style={{ flex: 1, padding: 24, justifyContent: "center", gap: 12 }}>
@@ -121,7 +100,13 @@ export default function ConfirmScreen() {
       <View style={{ flexDirection: "row", justifyContent: "center", gap: 12 }}>
         <Pressable
           onPress={onPlay}
-          style={{ padding: 12, borderWidth: 1, borderRadius: 12 }}
+          disabled={!safeUri}
+          style={{
+            padding: 12,
+            borderWidth: 1,
+            borderRadius: 12,
+            opacity: safeUri ? 1 : 0.4,
+          }}
         >
           <Text>Play</Text>
         </Pressable>
@@ -134,26 +119,8 @@ export default function ConfirmScreen() {
         </Pressable>
       </View>
 
-      {/* Upload to S3 */}
-      <Pressable
-        onPress={onUploadToS3}
-        disabled={!canUpload}
-        style={{
-          padding: 14,
-          borderWidth: 1,
-          borderRadius: 12,
-          marginTop: 6,
-          alignItems: "center",
-          opacity: canUpload ? 1 : 0.4,
-        }}
-      >
-        <Text style={{ fontSize: 16, fontWeight: "600" }}>
-          {isUploading ? "Uploading..." : uploadedKey ? "Re-upload to S3" : "Upload to S3"}
-        </Text>
-      </Pressable>
-
-      {uploadStatus ? (
-        <Text style={{ marginTop: 6, textAlign: "center" }}>{uploadStatus}</Text>
+      {status ? (
+        <Text style={{ marginTop: 6, textAlign: "center" }}>{status}</Text>
       ) : null}
 
       <Text style={{ marginTop: 10, fontWeight: "600" }}>Suggestions</Text>
@@ -164,11 +131,12 @@ export default function ConfirmScreen() {
           <Pressable
             key={intent.id}
             onPress={() => setSelectedId(intent.id)}
+            disabled={isConfirming}
             style={{
               padding: 14,
               borderWidth: 1,
               borderRadius: 12,
-              opacity: active ? 1 : 0.7,
+              opacity: isConfirming ? 0.5 : active ? 1 : 0.7,
             }}
           >
             <Text style={{ fontSize: 16 }}>{intent.label}</Text>
@@ -178,18 +146,18 @@ export default function ConfirmScreen() {
 
       <Pressable
         onPress={onConfirm}
-        disabled={!canConfirm || isConfirming}
+        disabled={!canConfirm}
         style={{
           marginTop: 14,
           padding: 14,
           borderRadius: 12,
           borderWidth: 1,
-          opacity: canConfirm && !isConfirming ? 1 : 0.4,
+          opacity: canConfirm ? 1 : 0.4,
           alignItems: "center",
         }}
       >
         <Text style={{ fontSize: 16, fontWeight: "600" }}>
-          {isConfirming ? "Saving..." : "Confirm"}
+          {isConfirming ? "Confirming..." : "Confirm"}
         </Text>
       </Pressable>
     </View>
