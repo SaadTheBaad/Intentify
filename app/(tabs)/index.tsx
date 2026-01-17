@@ -119,7 +119,7 @@ export default function RecordScreen() {
         styles.container,
         {
           paddingTop: insets.top + 18,
-          paddingBottom: Math.max(insets.bottom, 18) + 90,
+          paddingBottom: Math.max(insets.bottom, 18) + 100,
         },
       ]}
     >
