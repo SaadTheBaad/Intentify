@@ -18,7 +18,7 @@ Resources:
     Properties:
       StageName: prod
       Cors:
-        AllowMethods: "'OPTIONS,GET,POST'"
+        AllowMethods: "'OPTIONS,GET,POST,DELETE'"
         AllowHeaders: "'Content-Type'"
         AllowOrigin: "'*'"
 
@@ -113,6 +113,69 @@ Resources:
             RestApiId: !Ref Api
             Path: /recordings
             Method: GET
+
+  IntentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: intents/
+      Handler: handler.handler
+      Environment:
+        Variables:
+          INTENT_RECORDS_TABLE: !Ref IntentRecordsTable
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:Query
+                - dynamodb:DeleteItem
+              Resource: !GetAtt IntentRecordsTable.Arn
+      Events:
+        ListIntentsRoute:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /intents
+            Method: GET
+        CreateIntentRoute:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /intents
+            Method: POST
+        DeleteIntentRoute:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /intents
+            Method: DELETE
+
+  SpeakFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: speak/
+      Handler: handler.handler
+      Environment:
+        Variables:
+          BUCKET_NAME: intentbridge-audio-2026
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - polly:SynthesizeSpeech
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+              Resource: arn:aws:s3:::intentbridge-audio-2026/*
+      Events:
+        SpeakRoute:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /speak
+            Method: POST
 
 Outputs:
   ApiBaseUrl:
