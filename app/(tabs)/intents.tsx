@@ -20,17 +20,7 @@ import {
   listIntents,
 } from "../../src/services/apiService";
 import { getOrCreateDeviceId } from "../../src/services/storageService";
-
-function makeId(label: string) {
-  return (
-    label
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/(^-|-$)/g, "")
-      .slice(0, 50) || `intent-${Date.now()}`
-  );
-}
+import { makeIntentId } from "../../src/utils/intent";
 
 export default function IntentsScreen() {
   const insets = useSafeAreaInsets();
@@ -68,7 +58,7 @@ export default function IntentsScreen() {
     if (!canAdd) return;
     try {
       setError(null);
-      const id = makeId(label);
+      const id = makeIntentId(label);
       await createIntent(deviceId, id, label.trim());
       setLabel("");
       await load();

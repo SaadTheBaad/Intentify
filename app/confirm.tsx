@@ -26,6 +26,7 @@ import {
   suggestIntent,
   transcribeFromS3,
 } from "../src/services/apiService";
+import { makeIntentId } from "../src/utils/intent";
 
 import { uploadToPresignedUrl } from "../src/services/s3UploadService";
 
@@ -35,17 +36,6 @@ type Suggestion = {
   score: number;
   isAi?: boolean;
 };
-
-function makeIntentId(label: string) {
-  return (
-    label
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/(^-|-$)/g, "")
-      .slice(0, 50) || `intent-${Date.now()}`
-  );
-}
 
 function scoreLabel(score: number) {
   if (score >= 0.6) return "High";
