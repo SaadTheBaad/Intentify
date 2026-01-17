@@ -1,5 +1,10 @@
-const API_BASE =
-  "https://s4z4ahi4z0.execute-api.ca-central-1.amazonaws.com/prod";
+const API_BASE = process.env.EXPO_PUBLIC_API_BASE_URL;
+
+if (!API_BASE) {
+  throw new Error(
+    "Missing EXPO_PUBLIC_API_BASE_URL. Add it to .env (Expo public env var)."
+  );
+}
 
 // --------------------
 // Presign
