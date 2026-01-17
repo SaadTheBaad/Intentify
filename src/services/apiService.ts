@@ -1,6 +1,9 @@
 const API_BASE =
-  "https://c2hpf2rbbj.execute-api.ca-central-1.amazonaws.com/prod";
+  "https://s4z4ahi4z0.execute-api.ca-central-1.amazonaws.com/prod";
 
+// --------------------
+// Presign
+// --------------------
 export async function getPresignedUrl(userId: string) {
   const res = await fetch(`${API_BASE}/presign`, {
     method: "POST",
@@ -18,4 +21,77 @@ export async function getPresignedUrl(userId: string) {
     key: string;
     bucket: string;
   };
+}
+
+// --------------------
+// Recordings
+// --------------------
+export type CreateRecordingRequest = {
+  deviceId: string;
+  recordingId: string;
+  s3Key: string;
+  confirmedIntent: string;
+  durationSeconds?: number;
+  createdAt?: string; // ISO string
+  transcript?: string | null;
+};
+
+export type CreateRecordingResponse = {
+  ok: true;
+  pk: string;
+  sk: string;
+};
+
+export async function createRecording(
+  payload: CreateRecordingRequest,
+): Promise<CreateRecordingResponse> {
+  const res = await fetch(`${API_BASE}/recordings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`createRecording failed: ${res.status} ${text}`);
+  }
+
+  return (await res.json()) as CreateRecordingResponse;
+}
+
+export type RecordingItem = {
+  pk: string;
+  sk: string;
+  entityType?: string;
+  deviceId: string;
+  recordingId: string;
+  s3Key: string;
+  confirmedIntent: string;
+  durationSeconds?: number | null;
+  transcript?: string | null;
+  createdAt: string;
+  savedAt?: string;
+};
+
+export type ListRecordingsResponse = {
+  ok: true;
+  items: RecordingItem[];
+};
+
+export async function listRecordings(
+  deviceId: string,
+): Promise<ListRecordingsResponse> {
+  const url = `${API_BASE}/recordings?deviceId=${encodeURIComponent(deviceId)}`;
+
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`listRecordings failed: ${res.status} ${text}`);
+  }
+
+  return (await res.json()) as ListRecordingsResponse;
 }

@@ -1,30 +1,76 @@
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useState } from "react";
-import { FlatList, Pressable, Text, View } from "react-native";
+import { Alert, FlatList, Pressable, Text, View } from "react-native";
 
 import {
-    clearHistory,
-    getHistory,
-    HistoryItem,
+  clearHistory,
+  getHistory,
+  getOrCreateDeviceId,
+  HistoryItem,
 } from "../../src/services/storageService";
 
+import { listRecordings, RecordingItem } from "../../src/services/apiService";
 import { playRecording, stopPlayback } from "../../src/services/audioService";
 
+type UiItem = {
+  id: string;
+  createdAt: string;
+  intentLabel: string;
+  audioUri?: string; // local only
+  s3Key?: string; // backend or local
+  source: "backend" | "local";
+};
+
+function mapBackendToUi(item: RecordingItem): UiItem {
+  return {
+    id: item.recordingId,
+    createdAt: item.createdAt,
+    intentLabel: item.confirmedIntent,
+    s3Key: item.s3Key,
+    source: "backend",
+  };
+}
+
+function mapLocalToUi(item: HistoryItem): UiItem {
+  return {
+    id: item.id,
+    createdAt: item.createdAt,
+    intentLabel: item.intentLabel,
+    audioUri: item.audioUri,
+    s3Key: item.s3Key,
+    source: "local",
+  };
+}
+
 export default function HistoryScreen() {
-  const [items, setItems] = useState<HistoryItem[]>([]);
+  const [items, setItems] = useState<UiItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
     try {
       setError(null);
-      const data = await getHistory();
-      setItems(data);
+
+      const deviceId = await getOrCreateDeviceId();
+
+      // 1) Try backend first
+      try {
+        const res = await listRecordings(deviceId);
+        const backendItems = (res.items || []).map(mapBackendToUi);
+        setItems(backendItems);
+        return;
+      } catch (backendErr: any) {
+        // Backend failed — fallback to local storage
+        const local = await getHistory();
+        setItems(local.map(mapLocalToUi));
+        setError(
+          `Backend unavailable, showing local history. (${backendErr?.message ?? "error"})`,
+        );
+      }
     } catch (e: any) {
       setError(e?.message ?? "Failed to load history");
     }
   };
 
-  // Reload history every time the History tab is focused
   useFocusEffect(
     useCallback(() => {
       load();
@@ -34,7 +80,7 @@ export default function HistoryScreen() {
   const onClear = async () => {
     try {
       setError(null);
-      await stopPlayback(); // stop any playing audio
+      await stopPlayback();
       await clearHistory();
       await load();
     } catch (e: any) {
@@ -51,10 +97,21 @@ export default function HistoryScreen() {
     }
   };
 
-  const onPlayItem = async (item: HistoryItem) => {
+  const onPlayItem = async (item: UiItem) => {
     try {
       setError(null);
-      await playRecording(item.audioUri);
+
+      // If it’s local and we have the file URI, play it
+      if (item.audioUri) {
+        await playRecording(item.audioUri);
+        return;
+      }
+
+      // If it’s backend-only, we don’t have a presigned GET yet
+      Alert.alert(
+        "Playback not available yet",
+        "This entry came from the cloud history. Next step is adding a secure presigned GET endpoint for playback.",
+      );
     } catch (e: any) {
       setError(e?.message ?? "Failed to play recording");
     }
@@ -93,7 +150,6 @@ export default function HistoryScreen() {
         <Text style={{ marginTop: 10, color: "red" }}>{error}</Text>
       ) : null}
 
-      {/* List */}
       <FlatList
         style={{ marginTop: 12 }}
         data={items}
@@ -111,10 +167,22 @@ export default function HistoryScreen() {
               marginBottom: 10,
             }}
           >
-            <Text style={{ fontWeight: "600" }}>{item.intentLabel}</Text>
+            <Text style={{ fontWeight: "600" }}>
+              {item.intentLabel}{" "}
+              <Text style={{ opacity: 0.6 }}>
+                ({item.source === "backend" ? "cloud" : "local"})
+              </Text>
+            </Text>
+
             <Text style={{ marginTop: 6, opacity: 0.7 }}>
               {new Date(item.createdAt).toLocaleString()}
             </Text>
+
+            {item.s3Key ? (
+              <Text style={{ marginTop: 6, opacity: 0.6, fontSize: 12 }}>
+                S3: {item.s3Key}
+              </Text>
+            ) : null}
           </Pressable>
         )}
       />
