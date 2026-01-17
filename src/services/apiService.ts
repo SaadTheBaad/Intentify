@@ -109,3 +109,72 @@ export async function getPresignedDownloadUrl(key: string) {
 
   return (await res.json()) as { ok: true; downloadUrl: string };
 }
+
+export type IntentItem = {
+  intentId: string;
+  label: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export async function listIntents(deviceId: string) {
+  const res = await fetch(
+    `${API_BASE}/intents?deviceId=${encodeURIComponent(deviceId)}`,
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`listIntents failed: ${res.status} ${text}`);
+  }
+  return (await res.json()) as { ok: true; items: IntentItem[] };
+}
+
+export async function createIntent(
+  deviceId: string,
+  intentId: string,
+  label: string,
+) {
+  const res = await fetch(`${API_BASE}/intents`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId, intentId, label }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`createIntent failed: ${res.status} ${text}`);
+  }
+  return (await res.json()) as { ok: true; intentId: string };
+}
+
+export async function deleteIntent(deviceId: string, intentId: string) {
+  const res = await fetch(
+    `${API_BASE}/intents?deviceId=${encodeURIComponent(deviceId)}&intentId=${encodeURIComponent(intentId)}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`deleteIntent failed: ${res.status} ${text}`);
+  }
+  return (await res.json()) as { ok: true };
+}
+
+export async function speakText(
+  deviceId: string,
+  text: string,
+  voiceId?: string,
+) {
+  const res = await fetch(`${API_BASE}/speak`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId, text, voiceId }),
+  });
+  if (!res.ok) {
+    const textRes = await res.text();
+    throw new Error(`speak failed: ${res.status} ${textRes}`);
+  }
+  return (await res.json()) as {
+    ok: true;
+    key: string;
+    downloadUrl: string;
+    voiceId: string;
+  };
+}
