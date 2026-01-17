@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Pressable, Text, View } from "react-native";
 
 import { playRecording, stopPlayback } from "../src/services/audioService";
@@ -34,6 +34,7 @@ function makeIntentId(label: string) {
 export default function ConfirmScreen() {
   const { uri } = useLocalSearchParams<{ uri?: string }>();
   const safeUri = useMemo(() => (typeof uri === "string" ? uri : null), [uri]);
+  const lastAutoUri = useRef<string | null>(null);
 
   const [status, setStatus] = useState<string | null>(null);
   const [isWorking, setIsWorking] = useState(false);
@@ -192,6 +193,13 @@ export default function ConfirmScreen() {
 
   const canGenerate = !!safeUri && !isWorking;
   const canConfirm = !!pending && !!selectedId && !isWorking;
+
+  useEffect(() => {
+    if (!safeUri) return;
+    if (lastAutoUri.current === safeUri) return;
+    lastAutoUri.current = safeUri;
+    onGenerateSuggestions();
+  }, [safeUri]);
 
   return (
     <View style={{ flex: 1, padding: 24, justifyContent: "center", gap: 12 }}>
