@@ -1,6 +1,16 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
+import { LinearGradient } from "expo-linear-gradient";
 import { useCallback, useMemo, useState } from "react";
-import { Alert, FlatList, Pressable, Text, View } from "react-native";
+import {
+  Alert,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   clearHistory,
@@ -48,14 +58,30 @@ function mapLocalToUi(item: HistoryItem): UiItem {
   };
 }
 
+function formatWhen(iso: string) {
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function shortKey(key: string, max = 42) {
+  if (key.length <= max) return key;
+  return key.slice(0, 18) + "…" + key.slice(-18);
+}
+
 export default function HistoryScreen() {
+  const insets = useSafeAreaInsets();
+
   const [items, setItems] = useState<UiItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // Device ID needed for Polly speak calls
   const [deviceId, setDeviceId] = useState<string>("");
 
-  // Loading states
   const [playingKey, setPlayingKey] = useState<string | null>(null);
   const [speakingKey, setSpeakingKey] = useState<string | null>(null);
 
@@ -66,16 +92,13 @@ export default function HistoryScreen() {
       const did = await getOrCreateDeviceId();
       setDeviceId(did);
 
-      // Load local always
       const local = await getHistory();
       const localItems = local.map(mapLocalToUi);
 
-      // Try backend
       try {
         const res = await listRecordings(did);
         const backendItems = (res.items || []).map(mapBackendToUi);
 
-        // Merge (cloud first), then local — dedupe by s3Key when available
         const seen = new Set<string>();
         const merged: UiItem[] = [];
 
@@ -95,15 +118,13 @@ export default function HistoryScreen() {
           }
         }
 
-        // Sort newest first
         merged.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-
         setItems(merged);
         return;
       } catch (backendErr: any) {
         setItems(localItems);
         setError(
-          `Backend unavailable, showing local history. (${backendErr?.message ?? "error"})`,
+          `Backend unavailable, showing local history. (${backendErr?.message ?? "error"})`
         );
       }
     } catch (e: any) {
@@ -114,7 +135,7 @@ export default function HistoryScreen() {
   useFocusEffect(
     useCallback(() => {
       load();
-    }, []),
+    }, [])
   );
 
   const onClear = async () => {
@@ -137,10 +158,7 @@ export default function HistoryScreen() {
     }
   };
 
-  const itemKey = useCallback(
-    (item: UiItem) => `${item.source}:${item.id}`,
-    [],
-  );
+  const itemKey = useCallback((item: UiItem) => `${item.source}:${item.id}`, []);
 
   const onPlayItem = async (item: UiItem) => {
     const k = itemKey(item);
@@ -149,16 +167,13 @@ export default function HistoryScreen() {
       setError(null);
       setPlayingKey(k);
 
-      // Stop previous playback before starting new
       await stopPlayback();
 
-      // Local playback
       if (item.audioUri) {
         await playRecording(item.audioUri);
         return;
       }
 
-      // Cloud playback
       if (item.s3Key) {
         const { downloadUrl } = await getPresignedDownloadUrl(item.s3Key);
         await playRecording(downloadUrl);
@@ -182,7 +197,6 @@ export default function HistoryScreen() {
 
       const did = deviceId || (await getOrCreateDeviceId());
 
-      // Stop previous playback before speaking
       await stopPlayback();
 
       const res = await speakText(did, item.intentLabel);
@@ -196,129 +210,131 @@ export default function HistoryScreen() {
 
   const isBusy = useMemo(
     () => playingKey !== null || speakingKey !== null,
-    [playingKey, speakingKey],
+    [playingKey, speakingKey]
   );
 
   return (
-    <View style={{ flex: 1, padding: 16 }}>
+    <LinearGradient
+      colors={["#0B1020", "#0E1731", "#0A0F1F"]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={[
+        styles.container,
+        {
+          paddingTop: insets.top + 14,
+          paddingBottom: Math.max(insets.bottom, 18) + 110, 
+        },
+      ]}
+    >
       {/* Header */}
-      <View
-        style={{
-          flexDirection: "row",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <Text style={{ fontSize: 22, fontWeight: "700" }}>History</Text>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.title}>History</Text>
+          <Text style={styles.subtitle}>Your recent recordings and intents</Text>
+        </View>
 
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View style={styles.headerActions}>
           <Pressable
             onPress={onStopAudio}
-            style={{ padding: 10, borderWidth: 1, borderRadius: 10 }}
+            style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.85 }]}
           >
-            <Text>Stop</Text>
+            <Ionicons name="square" size={18} color="#D7E3FF" />
+            <Text style={styles.iconBtnText}>Stop</Text>
           </Pressable>
 
           <Pressable
             onPress={onClear}
-            style={{ padding: 10, borderWidth: 1, borderRadius: 10 }}
+            style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.85 }]}
           >
-            <Text>Clear</Text>
+            <Ionicons name="trash" size={18} color="#FFD1D1" />
+            <Text style={[styles.iconBtnText, { color: "#FFD1D1" }]}>Clear</Text>
           </Pressable>
         </View>
       </View>
 
       {error ? (
-        <Text style={{ marginTop: 10, color: "red" }}>{error}</Text>
+        <View style={styles.errorBox}>
+          <Ionicons name="warning" size={16} color="#FFD1D1" />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
       ) : null}
 
       <FlatList
-        style={{ marginTop: 12 }}
+        contentContainerStyle={{ paddingTop: 12, paddingBottom: 12 }}
         data={items}
         keyExtractor={(item) => `${item.source}:${item.id}`}
         ListEmptyComponent={
-          <Text style={{ marginTop: 20 }}>No history yet.</Text>
+          <View style={styles.empty}>
+            <Ionicons name="time-outline" size={22} color="rgba(215,227,255,0.55)" />
+            <Text style={styles.emptyTitle}>No history yet</Text>
+            <Text style={styles.emptyText}>Record something on Home to see it here.</Text>
+          </View>
         }
         renderItem={({ item }) => {
           const k = itemKey(item);
           const isPlayingThis = playingKey === k;
           const isSpeakingThis = speakingKey === k;
 
+          const sourceLabel = item.source === "backend" ? "cloud" : "local";
+
           return (
-            <View
-              style={{
-                padding: 14,
-                borderWidth: 1,
-                borderRadius: 12,
-                marginBottom: 10,
-                gap: 10,
-              }}
-            >
-              {/* Main tap = play original audio */}
-              <Pressable
-                onPress={() => onPlayItem(item)}
-                disabled={isBusy}
-                style={{ opacity: isBusy ? 0.6 : 1 }}
-              >
-                <Text style={{ fontWeight: "600" }}>
-                  {item.intentLabel}{" "}
-                  <Text style={{ opacity: 0.6 }}>
-                    ({item.source === "backend" ? "cloud" : "local"})
+            <View style={styles.card}>
+              <View style={styles.cardTopRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.intent} numberOfLines={1}>
+                    {item.intentLabel || "Untitled"}
                   </Text>
-                </Text>
 
-                <Text style={{ marginTop: 6, opacity: 0.7 }}>
-                  {new Date(item.createdAt).toLocaleString()}
-                </Text>
+                  <View style={styles.metaRow}>
+                    <Ionicons name="calendar-outline" size={14} color="rgba(234,240,255,0.65)" />
+                    <Text style={styles.metaText}>{formatWhen(item.createdAt)}</Text>
 
-                {item.s3Key ? (
-                  <Text style={{ marginTop: 6, opacity: 0.6, fontSize: 12 }}>
-                    S3: {item.s3Key}
-                  </Text>
-                ) : null}
+                    <View style={[styles.chip, item.source === "backend" ? styles.chipCloud : styles.chipLocal]}>
+                      <Ionicons
+                        name={item.source === "backend" ? "cloud-outline" : "phone-portrait-outline"}
+                        size={12}
+                        color="#D7E3FF"
+                      />
+                      <Text style={styles.chipText}>{sourceLabel}</Text>
+                    </View>
+                  </View>
 
-                {isPlayingThis ? (
-                  <Text style={{ marginTop: 8, opacity: 0.7 }}>
-                    Loading audio...
-                  </Text>
-                ) : null}
-              </Pressable>
+                  {item.s3Key ? (
+                    <Text style={styles.s3} numberOfLines={1}>
+                      {shortKey(item.s3Key)}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
 
-              {/* Actions row */}
-              <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={styles.actionsRow}>
                 <Pressable
                   onPress={() => onSpeakItem(item)}
                   disabled={isBusy}
-                  style={{
-                    paddingVertical: 10,
-                    paddingHorizontal: 12,
-                    borderWidth: 1,
-                    borderRadius: 10,
-                    alignItems: "center",
-                    opacity: isBusy ? 0.6 : 1,
-                    flex: 1,
-                  }}
+                  style={({ pressed }) => [
+                    styles.actionBtn,
+                    isBusy && styles.actionBtnDisabled,
+                    pressed && !isBusy && { opacity: 0.88 },
+                  ]}
                 >
-                  <Text style={{ fontWeight: "700" }}>
-                    {isSpeakingThis ? "Speaking..." : "Speak"}
+                  <Ionicons name="volume-high" size={18} color="#D7E3FF" />
+                  <Text style={styles.actionText}>
+                    {isSpeakingThis ? "Speaking…" : "Speak"}
                   </Text>
                 </Pressable>
 
                 <Pressable
                   onPress={() => onPlayItem(item)}
                   disabled={isBusy}
-                  style={{
-                    paddingVertical: 10,
-                    paddingHorizontal: 12,
-                    borderWidth: 1,
-                    borderRadius: 10,
-                    alignItems: "center",
-                    opacity: isBusy ? 0.6 : 1,
-                    flex: 1,
-                  }}
+                  style={({ pressed }) => [
+                    styles.actionBtn,
+                    isBusy && styles.actionBtnDisabled,
+                    pressed && !isBusy && { opacity: 0.88 },
+                  ]}
                 >
-                  <Text style={{ fontWeight: "700" }}>
-                    {isPlayingThis ? "Loading..." : "Play"}
+                  <Ionicons name="play" size={18} color="#D7E3FF" />
+                  <Text style={styles.actionText}>
+                    {isPlayingThis ? "Loading…" : "Play"}
                   </Text>
                 </Pressable>
               </View>
@@ -326,6 +342,122 @@ export default function HistoryScreen() {
           );
         }}
       />
-    </View>
+    </LinearGradient>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1, paddingHorizontal: 18 },
+
+  header: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  title: { color: "#EAF0FF", fontSize: 26, fontWeight: "900" },
+  subtitle: { marginTop: 4, color: "rgba(234,240,255,0.60)", fontSize: 12 },
+
+  headerActions: { flexDirection: "row", gap: 10 },
+  iconBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: "rgba(215,227,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(215,227,255,0.14)",
+  },
+  iconBtnText: { color: "#D7E3FF", fontSize: 13, fontWeight: "800" },
+
+  errorBox: {
+    marginTop: 12,
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,92,92,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,92,92,0.22)",
+  },
+  errorText: { flex: 1, color: "#FFE9E9", fontSize: 12, fontWeight: "700" },
+
+  empty: {
+    marginTop: 32,
+    borderRadius: 22,
+    padding: 18,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    alignItems: "center",
+    gap: 8,
+  },
+  emptyTitle: { color: "#EAF0FF", fontWeight: "900", fontSize: 16, marginTop: 4 },
+  emptyText: { color: "rgba(234,240,255,0.65)", fontSize: 12, textAlign: "center" },
+
+  card: {
+    marginBottom: 12,
+    borderRadius: 22,
+    padding: 16,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+  },
+
+  cardTopRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+
+  intent: { color: "#EAF0FF", fontSize: 16, fontWeight: "900" },
+
+  metaRow: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  metaText: { color: "rgba(234,240,255,0.65)", fontSize: 12 },
+
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  chipCloud: {
+    backgroundColor: "rgba(215,227,255,0.10)",
+    borderColor: "rgba(215,227,255,0.14)",
+  },
+  chipLocal: {
+    backgroundColor: "rgba(215,227,255,0.08)",
+    borderColor: "rgba(215,227,255,0.12)",
+  },
+  chipText: { color: "#D7E3FF", fontSize: 12, fontWeight: "800" },
+
+  s3: {
+    marginTop: 8,
+    color: "rgba(234,240,255,0.45)",
+    fontSize: 12,
+  },
+
+  actionsRow: { marginTop: 14, flexDirection: "row", gap: 10 },
+  actionBtn: {
+    flex: 1,
+    flexDirection: "row",
+    gap: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: "rgba(215,227,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(215,227,255,0.14)",
+  },
+  actionBtnDisabled: { opacity: 0.55 },
+  actionText: { color: "#D7E3FF", fontWeight: "900", fontSize: 14 },
+});
