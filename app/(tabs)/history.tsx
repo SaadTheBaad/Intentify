@@ -9,7 +9,12 @@ import {
   HistoryItem,
 } from "../../src/services/storageService";
 
-import { listRecordings, RecordingItem } from "../../src/services/apiService";
+import {
+  getPresignedDownloadUrl,
+  listRecordings,
+  RecordingItem,
+} from "../../src/services/apiService";
+
 import { playRecording, stopPlayback } from "../../src/services/audioService";
 
 type UiItem = {
@@ -63,7 +68,9 @@ export default function HistoryScreen() {
         const local = await getHistory();
         setItems(local.map(mapLocalToUi));
         setError(
-          `Backend unavailable, showing local history. (${backendErr?.message ?? "error"})`,
+          `Backend unavailable, showing local history. (${
+            backendErr?.message ?? "error"
+          })`,
         );
       }
     } catch (e: any) {
@@ -101,17 +108,20 @@ export default function HistoryScreen() {
     try {
       setError(null);
 
-      // If it’s local and we have the file URI, play it
+      // Local playback
       if (item.audioUri) {
         await playRecording(item.audioUri);
         return;
       }
 
-      // If it’s backend-only, we don’t have a presigned GET yet
-      Alert.alert(
-        "Playback not available yet",
-        "This entry came from the cloud history. Next step is adding a secure presigned GET endpoint for playback.",
-      );
+      // Cloud playback
+      if (item.s3Key) {
+        const { downloadUrl } = await getPresignedDownloadUrl(item.s3Key);
+        await playRecording(downloadUrl);
+        return;
+      }
+
+      Alert.alert("No audio", "This item has no local audioUri or S3 key.");
     } catch (e: any) {
       setError(e?.message ?? "Failed to play recording");
     }

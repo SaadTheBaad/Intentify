@@ -95,3 +95,17 @@ export async function listRecordings(
 
   return (await res.json()) as ListRecordingsResponse;
 }
+
+export async function getPresignedDownloadUrl(key: string) {
+  const res = await fetch(
+    `${API_BASE}/presign-get?key=${encodeURIComponent(key)}`,
+    { method: "GET" },
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`presign-get failed: ${res.status} ${text}`);
+  }
+
+  return (await res.json()) as { ok: true; downloadUrl: string };
+}
