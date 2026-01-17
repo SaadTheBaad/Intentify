@@ -8,16 +8,19 @@ const {
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
+const TABLE = process.env.INTENT_RECORDS_TABLE;
+const OPENAI_KEY = process.env.OPENAI_API_KEY;
+const EMBED_MODEL = process.env.OPENAI_EMBED_MODEL || "text-embedding-3-small";
+
 exports.handler = async (event) => {
   try {
-    const tableName = process.env.INTENT_RECORDS_TABLE;
-    if (!tableName) return resp(500, { error: "Missing INTENT_RECORDS_TABLE" });
+    if (!TABLE) return resp(500, { error: "Missing INTENT_RECORDS_TABLE" });
 
     const method = (event.httpMethod || "").toUpperCase();
 
-    if (method === "GET") return await handleGet(event, tableName);
-    if (method === "POST") return await handlePost(event, tableName);
-    if (method === "DELETE") return await handleDelete(event, tableName);
+    if (method === "GET") return await handleGet(event);
+    if (method === "POST") return await handlePost(event);
+    if (method === "DELETE") return await handleDelete(event);
 
     return resp(405, { error: `Method not allowed: ${method}` });
   } catch (err) {
@@ -26,7 +29,7 @@ exports.handler = async (event) => {
   }
 };
 
-async function handleGet(event, tableName) {
+async function handleGet(event) {
   const qs = event.queryStringParameters || {};
   const deviceId = qs.deviceId;
   if (!deviceId) return resp(400, { error: "Missing deviceId query param" });
@@ -35,7 +38,7 @@ async function handleGet(event, tableName) {
 
   const out = await ddb.send(
     new QueryCommand({
-      TableName: tableName,
+      TableName: TABLE,
       KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
       ExpressionAttributeValues: {
         ":pk": pk,
@@ -55,24 +58,27 @@ async function handleGet(event, tableName) {
   return resp(200, { ok: true, items });
 }
 
-async function handlePost(event, tableName) {
+async function handlePost(event) {
   const body = safeJson(event.body);
   if (!body) return resp(400, { error: "Invalid JSON body" });
 
   const { deviceId, intentId, label } = body;
   if (!deviceId || !intentId || !label) {
-    return resp(400, {
-      error: "Missing required fields: deviceId, intentId, label",
-    });
+    return resp(400, { error: "Missing required fields: deviceId, intentId, label" });
   }
+
+  if (!OPENAI_KEY) return resp(500, { error: "Missing OPENAI_API_KEY" });
 
   const now = new Date().toISOString();
   const pk = `USER#${deviceId}`;
   const sk = `INTENT#${intentId}`;
 
+  // Embed label once, store it
+  const embedding = await embedText(label);
+
   await ddb.send(
     new PutCommand({
-      TableName: tableName,
+      TableName: TABLE,
       Item: {
         pk,
         sk,
@@ -80,6 +86,7 @@ async function handlePost(event, tableName) {
         deviceId,
         intentId,
         label,
+        embedding, // float[]
         createdAt: now,
         updatedAt: now,
       },
@@ -89,7 +96,7 @@ async function handlePost(event, tableName) {
   return resp(200, { ok: true, intentId });
 }
 
-async function handleDelete(event, tableName) {
+async function handleDelete(event) {
   const qs = event.queryStringParameters || {};
   const deviceId = qs.deviceId;
   const intentId = qs.intentId;
@@ -103,12 +110,38 @@ async function handleDelete(event, tableName) {
 
   await ddb.send(
     new DeleteCommand({
-      TableName: tableName,
+      TableName: TABLE,
       Key: { pk, sk },
     }),
   );
 
   return resp(200, { ok: true });
+}
+
+async function embedText(text) {
+  const r = await fetch("https://api.openai.com/v1/embeddings", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_KEY}`,
+    },
+    body: JSON.stringify({
+      model: EMBED_MODEL,
+      input: text,
+    }),
+  });
+
+  if (!r.ok) {
+    const t = await r.text();
+    console.error("OpenAI embeddings failed:", r.status, t);
+    throw new Error(`embeddings failed: ${r.status}`);
+  }
+
+  const json = await r.json();
+  const vec = json?.data?.[0]?.embedding;
+
+  if (!Array.isArray(vec)) throw new Error("No embedding returned");
+  return vec;
 }
 
 function resp(statusCode, body) {
@@ -117,7 +150,7 @@ function resp(statusCode, body) {
     headers: {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Headers": "Content-Type,Authorization",
       "Access-Control-Allow-Methods": "OPTIONS,GET,POST,DELETE",
     },
     body: JSON.stringify(body),

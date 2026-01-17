@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Alert, Pressable, Text, View } from "react-native";
 
 import { playRecording, stopPlayback } from "../src/services/audioService";
@@ -11,49 +11,31 @@ import {
 import {
   createRecording,
   getPresignedUrl,
-  IntentItem,
-  listIntents,
-  speakText,
+  matchIntents,
+  transcribeFromS3,
 } from "../src/services/apiService";
 
 import { uploadToPresignedUrl } from "../src/services/s3UploadService";
 
+type Suggestion = { intentId: string; label: string; score: number };
+
 export default function ConfirmScreen() {
   const { uri } = useLocalSearchParams<{ uri?: string }>();
-
-  const [deviceId, setDeviceId] = useState<string>("");
-  const [intents, setIntents] = useState<IntentItem[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  const [status, setStatus] = useState<string | null>(null);
-  const [isConfirming, setIsConfirming] = useState(false);
-  const [isLoadingIntents, setIsLoadingIntents] = useState(false);
-
   const safeUri = useMemo(() => (typeof uri === "string" ? uri : null), [uri]);
 
-  const loadIntents = async () => {
-    try {
-      setIsLoadingIntents(true);
+  const [status, setStatus] = useState<string | null>(null);
+  const [isWorking, setIsWorking] = useState(false);
 
-      const did = await getOrCreateDeviceId();
-      setDeviceId(did);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-      const res = await listIntents(did);
-      const items = res.items || [];
-      setIntents(items);
-
-      if (!selectedId && items.length > 0) setSelectedId(items[0].intentId);
-    } catch (e: any) {
-      Alert.alert("Failed to load intents", e?.message ?? "Unknown error");
-    } finally {
-      setIsLoadingIntents(false);
-    }
-  };
-
-  useEffect(() => {
-    loadIntents();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const [pending, setPending] = useState<{
+    deviceId: string;
+    recordingId: string;
+    createdAt: string;
+    s3Key: string;
+    transcript: string;
+  } | null>(null);
 
   const onPlay = async () => {
     if (!safeUri) return;
@@ -64,66 +46,97 @@ export default function ConfirmScreen() {
     await stopPlayback();
   };
 
-  const onConfirm = async () => {
-    if (!safeUri) {
-      Alert.alert("Missing audio", "No recording URI was provided.");
-      return;
-    }
-    if (!selectedId) {
-      Alert.alert(
-        "Pick an intent",
-        "Please select one of your approved intents.",
-      );
-      return;
-    }
+  // Runs the whole pipeline once, then shows suggestions
+  const runPipeline = async () => {
+    if (!safeUri) return;
 
-    const selected = intents.find((i) => i.intentId === selectedId);
-    if (!selected) {
-      Alert.alert("Pick an intent", "Please select a valid intent.");
-      return;
-    }
+    setIsWorking(true);
+    setStatus(null);
+    setSuggestions([]);
+    setSelectedId(null);
+    setPending(null);
 
     try {
-      setIsConfirming(true);
-      setStatus(null);
-
-      const did = deviceId || (await getOrCreateDeviceId());
+      const deviceId = await getOrCreateDeviceId();
       const recordingId = `${Date.now()}`;
       const createdAt = new Date().toISOString();
 
-      // 1) Get presigned PUT URL
+      // 1) Presign PUT
       setStatus("Getting upload URL...");
-      const { uploadUrl, key } = await getPresignedUrl(did);
+      const { uploadUrl, key } = await getPresignedUrl(deviceId);
 
       // 2) Upload audio to S3
       setStatus("Uploading audio...");
       await uploadToPresignedUrl(uploadUrl, safeUri);
 
-      // 3) Save locally (offline-friendly cache)
-      setStatus("Saving locally...");
+      // 3) Transcribe (OpenAI on backend) - single call
+      setStatus("Transcribing...");
+      const tRes = await transcribeFromS3(deviceId, key);
+      const transcript = (tRes.transcript || "").trim();
+
+      if (!transcript) {
+        throw new Error("No transcript returned (try recording again).");
+      }
+
+      // 4) Match intents (your /match endpoint)
+      setStatus("Finding best intent...");
+      const matchRes = await matchIntents(deviceId, transcript, 3);
+
+      const sugg = matchRes.suggestions || [];
+      setSuggestions(sugg);
+      if (sugg.length > 0) setSelectedId(sugg[0].intentId);
+
+      // 5) Store pending for Confirm step
+      setPending({ deviceId, recordingId, createdAt, s3Key: key, transcript });
+
+      setStatus("Pick the best match, then Confirm ✅");
+    } finally {
+      setIsWorking(false);
+    }
+  };
+
+  const onGenerateSuggestions = async () => {
+    try {
+      await runPipeline();
+    } catch (e: any) {
+      Alert.alert("Failed", e?.message ?? "Unknown error");
+      setStatus(null);
+      setPending(null);
+      setSuggestions([]);
+      setSelectedId(null);
+      setIsWorking(false);
+    }
+  };
+
+  const onConfirm = async () => {
+    if (!pending || !selectedId) return;
+
+    const selected = suggestions.find((s) => s.intentId === selectedId);
+    if (!selected) return;
+
+    try {
+      setIsWorking(true);
+      setStatus("Saving...");
+
+      // Save local (offline-friendly cache)
       await saveHistoryItem({
-        id: recordingId,
-        createdAt,
-        audioUri: safeUri,
+        id: pending.recordingId,
+        createdAt: pending.createdAt,
+        audioUri: safeUri || "",
         intentId: selected.intentId,
         intentLabel: selected.label,
-        s3Key: key,
+        s3Key: pending.s3Key,
       });
 
-      // 4) Save recording metadata to DynamoDB
-      setStatus("Saving to cloud...");
+      // Save cloud metadata
       await createRecording({
-        deviceId: did,
-        recordingId,
-        s3Key: key,
+        deviceId: pending.deviceId,
+        recordingId: pending.recordingId,
+        s3Key: pending.s3Key,
         confirmedIntent: selected.label,
-        createdAt,
+        createdAt: pending.createdAt,
+        transcript: pending.transcript,
       });
-
-      // 5) Speak confirmed intent (Polly)
-      setStatus("Speaking...");
-      const tts = await speakText(did, selected.label);
-      await playRecording(tts.downloadUrl);
 
       setStatus("Done ✅");
       router.replace("/(tabs)/history");
@@ -131,16 +144,12 @@ export default function ConfirmScreen() {
       Alert.alert("Confirm failed", e?.message ?? "Unknown error");
       setStatus(null);
     } finally {
-      setIsConfirming(false);
+      setIsWorking(false);
     }
   };
 
-  const canConfirm =
-    !!safeUri &&
-    !!selectedId &&
-    !isConfirming &&
-    !isLoadingIntents &&
-    intents.length > 0;
+  const canGenerate = !!safeUri && !isWorking;
+  const canConfirm = !!pending && !!selectedId && !isWorking;
 
   return (
     <View style={{ flex: 1, padding: 24, justifyContent: "center", gap: 12 }}>
@@ -170,70 +179,50 @@ export default function ConfirmScreen() {
         </Pressable>
       </View>
 
-      {status ? (
-        <Text style={{ marginTop: 6, textAlign: "center" }}>{status}</Text>
-      ) : null}
-
-      <View
+      <Pressable
+        onPress={onGenerateSuggestions}
+        disabled={!canGenerate}
         style={{
-          marginTop: 10,
-          flexDirection: "row",
-          justifyContent: "space-between",
+          marginTop: 8,
+          padding: 14,
+          borderWidth: 1,
+          borderRadius: 12,
+          opacity: canGenerate ? 1 : 0.4,
+          alignItems: "center",
         }}
       >
-        <Text style={{ fontWeight: "600" }}>Suggestions</Text>
+        <Text style={{ fontSize: 16, fontWeight: "600" }}>
+          {isWorking ? "Working..." : "Generate Suggestions (AI)"}
+        </Text>
+      </Pressable>
 
-        <Pressable
-          onPress={() => router.push("/(tabs)/intents")}
-          disabled={isConfirming}
-          style={{
-            paddingVertical: 6,
-            paddingHorizontal: 10,
-            borderWidth: 1,
-            borderRadius: 10,
-            opacity: isConfirming ? 0.5 : 1,
-          }}
-        >
-          <Text>Edit</Text>
-        </Pressable>
-      </View>
+      {status ? <Text style={{ textAlign: "center" }}>{status}</Text> : null}
 
-      {isLoadingIntents ? (
-        <Text style={{ marginTop: 6, opacity: 0.7 }}>Loading intents...</Text>
-      ) : intents.length === 0 ? (
-        <View style={{ marginTop: 6, gap: 10 }}>
-          <Text style={{ opacity: 0.75 }}>
-            No intents yet. Add some in the Intents tab first.
-          </Text>
+      <Text style={{ marginTop: 10, fontWeight: "600" }}>Suggestions</Text>
 
-          <Pressable
-            onPress={() => router.push("/(tabs)/intents")}
-            style={{
-              padding: 12,
-              borderWidth: 1,
-              borderRadius: 12,
-              alignItems: "center",
-            }}
-          >
-            <Text style={{ fontWeight: "700" }}>Go to Intents</Text>
-          </Pressable>
-        </View>
+      {suggestions.length === 0 ? (
+        <Text style={{ opacity: 0.7 }}>
+          No suggestions yet. Press “Generate Suggestions (AI)”.
+        </Text>
       ) : (
-        intents.map((intent) => {
-          const active = intent.intentId === selectedId;
+        suggestions.map((s) => {
+          const active = s.intentId === selectedId;
           return (
             <Pressable
-              key={intent.intentId}
-              onPress={() => setSelectedId(intent.intentId)}
-              disabled={isConfirming}
+              key={s.intentId}
+              onPress={() => setSelectedId(s.intentId)}
+              disabled={isWorking}
               style={{
                 padding: 14,
                 borderWidth: 1,
                 borderRadius: 12,
-                opacity: isConfirming ? 0.5 : active ? 1 : 0.7,
+                opacity: isWorking ? 0.5 : active ? 1 : 0.7,
               }}
             >
-              <Text style={{ fontSize: 16 }}>{intent.label}</Text>
+              <Text style={{ fontSize: 16 }}>{s.label}</Text>
+              <Text style={{ marginTop: 6, opacity: 0.6, fontSize: 12 }}>
+                score: {s.score.toFixed(3)}
+              </Text>
             </Pressable>
           );
         })
@@ -252,7 +241,7 @@ export default function ConfirmScreen() {
         }}
       >
         <Text style={{ fontSize: 16, fontWeight: "600" }}>
-          {isConfirming ? "Confirming..." : "Confirm"}
+          {isWorking ? "Saving..." : "Confirm"}
         </Text>
       </Pressable>
     </View>

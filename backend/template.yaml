@@ -1,16 +1,29 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Intentify - presign upload URL API
+Description: Intentify - API (presign, recordings, intents, transcribe (OpenAI), match (OpenAI))
 
 Globals:
   Function:
     Runtime: nodejs18.x
-    Timeout: 10
+    Timeout: 30
 
 Parameters:
   IntentRecordsTableName:
     Type: String
     Default: Intentify-IntentRecords
+
+  OpenAIApiKey:
+    Type: String
+    NoEcho: true
+    Description: OpenAI API key (keep secret)
+
+  OpenAISttModel:
+    Type: String
+    Default: gpt-4o-mini-transcribe
+
+  OpenAIEmbedModel:
+    Type: String
+    Default: text-embedding-3-small
 
 Resources:
   Api:
@@ -19,7 +32,7 @@ Resources:
       StageName: prod
       Cors:
         AllowMethods: "'OPTIONS,GET,POST,DELETE'"
-        AllowHeaders: "'Content-Type'"
+        AllowHeaders: "'Content-Type,Authorization'"
         AllowOrigin: "'*'"
 
   IntentRecordsTable:
@@ -40,6 +53,9 @@ Resources:
       SSESpecification:
         SSEEnabled: true
 
+  # --------------------
+  # Presign PUT (upload)
+  # --------------------
   PresignFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -62,6 +78,9 @@ Resources:
             Path: /presign
             Method: POST
 
+  # --------------------
+  # Presign GET (playback)
+  # --------------------
   PresignGetFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -84,6 +103,9 @@ Resources:
             Path: /presign-get
             Method: GET
 
+  # --------------------
+  # Recordings (POST + GET)
+  # --------------------
   RecordingsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -114,6 +136,9 @@ Resources:
             Path: /recordings
             Method: GET
 
+  # --------------------
+  # Intents (POST + GET + DELETE) + store embedding (OpenAI)
+  # --------------------
   IntentsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -122,6 +147,8 @@ Resources:
       Environment:
         Variables:
           INTENT_RECORDS_TABLE: !Ref IntentRecordsTable
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_EMBED_MODEL: !Ref OpenAIEmbedModel
       Policies:
         - Statement:
             - Effect: Allow
@@ -137,12 +164,14 @@ Resources:
             RestApiId: !Ref Api
             Path: /intents
             Method: GET
+
         CreateIntentRoute:
           Type: Api
           Properties:
             RestApiId: !Ref Api
             Path: /intents
             Method: POST
+
         DeleteIntentRoute:
           Type: Api
           Properties:
@@ -150,31 +179,58 @@ Resources:
             Path: /intents
             Method: DELETE
 
-  SpeakFunction:
+  # --------------------
+  # Transcribe (OpenAI) - synchronous
+  # --------------------
+  OpenAITranscribeFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: speak/
+      CodeUri: transcribeOpenAI/
       Handler: handler.handler
       Environment:
         Variables:
           BUCKET_NAME: intentbridge-audio-2026
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_STT_MODEL: !Ref OpenAISttModel
       Policies:
         - Statement:
             - Effect: Allow
               Action:
-                - polly:SynthesizeSpeech
-              Resource: "*"
-            - Effect: Allow
-              Action:
-                - s3:PutObject
                 - s3:GetObject
               Resource: arn:aws:s3:::intentbridge-audio-2026/*
       Events:
-        SpeakRoute:
+        TranscribeRoute:
           Type: Api
           Properties:
             RestApiId: !Ref Api
-            Path: /speak
+            Path: /transcribe
+            Method: POST
+
+  # --------------------
+  # AI Match (OpenAI embeddings + cosine)
+  # --------------------
+  MatchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: match/
+      Handler: handler.handler
+      Environment:
+        Variables:
+          INTENT_RECORDS_TABLE: !Ref IntentRecordsTable
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_EMBED_MODEL: !Ref OpenAIEmbedModel
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource: !GetAtt IntentRecordsTable.Arn
+      Events:
+        MatchRoute:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /match
             Method: POST
 
 Outputs:
@@ -182,5 +238,5 @@ Outputs:
     Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/prod"
 
   IntentRecordsTableName:
-    Description: DynamoDB table for intent recording metadata
+    Description: DynamoDB table for intent + recordings metadata
     Value: !Ref IntentRecordsTable

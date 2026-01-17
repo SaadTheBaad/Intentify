@@ -96,6 +96,9 @@ export async function listRecordings(
   return (await res.json()) as ListRecordingsResponse;
 }
 
+// --------------------
+// Presign GET (playback)
+// --------------------
 export async function getPresignedDownloadUrl(key: string) {
   const res = await fetch(
     `${API_BASE}/presign-get?key=${encodeURIComponent(key)}`,
@@ -110,6 +113,9 @@ export async function getPresignedDownloadUrl(key: string) {
   return (await res.json()) as { ok: true; downloadUrl: string };
 }
 
+// --------------------
+// Intents
+// --------------------
 export type IntentItem = {
   intentId: string;
   label: string;
@@ -147,7 +153,9 @@ export async function createIntent(
 
 export async function deleteIntent(deviceId: string, intentId: string) {
   const res = await fetch(
-    `${API_BASE}/intents?deviceId=${encodeURIComponent(deviceId)}&intentId=${encodeURIComponent(intentId)}`,
+    `${API_BASE}/intents?deviceId=${encodeURIComponent(
+      deviceId,
+    )}&intentId=${encodeURIComponent(intentId)}`,
     { method: "DELETE" },
   );
   if (!res.ok) {
@@ -157,6 +165,9 @@ export async function deleteIntent(deviceId: string, intentId: string) {
   return (await res.json()) as { ok: true };
 }
 
+// --------------------
+// Speech (TTS)
+// --------------------
 export async function speakText(
   deviceId: string,
   text: string,
@@ -177,4 +188,50 @@ export async function speakText(
     downloadUrl: string;
     voiceId: string;
   };
+}
+
+// --------------------
+// ✅ NEW: OpenAI Transcribe (single call)
+// Backend should implement POST /transcribe { deviceId, s3Key } -> { transcript }
+// --------------------
+export async function transcribeFromS3(deviceId: string, s3Key: string) {
+  const res = await fetch(`${API_BASE}/transcribe`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId, s3Key }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`transcribe failed: ${res.status} ${text}`);
+  }
+
+  return (await res.json()) as { ok: true; transcript: string };
+}
+
+// --------------------
+// Match (intent suggestions)
+// --------------------
+export type MatchResponse = {
+  ok: true;
+  suggestions: { intentId: string; label: string; score: number }[];
+};
+
+export async function matchIntents(
+  deviceId: string,
+  transcript: string,
+  topK = 3,
+) {
+  const res = await fetch(`${API_BASE}/match`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId, transcript, topK }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`match failed: ${res.status} ${text}`);
+  }
+
+  return (await res.json()) as MatchResponse;
 }
