@@ -32,8 +32,11 @@ exports.handler = async (event) => {
       const result = await ddb.send(
         new QueryCommand({
           TableName: tableName,
-          KeyConditionExpression: "pk = :pk",
-          ExpressionAttributeValues: { ":pk": pk },
+          KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+          ExpressionAttributeValues: {
+            ":pk": pk,
+            ":prefix": "TS#", // recordings only
+          },
           ScanIndexForward: false, // newest first
           Limit: 50,
         })
