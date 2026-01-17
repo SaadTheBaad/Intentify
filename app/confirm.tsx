@@ -231,9 +231,15 @@ export default function ConfirmScreen() {
         {/* Header */}
         <View style={styles.headerRow}>
           <View style={styles.headerLeft}>
-            <View style={styles.appIcon}>
-              <Ionicons name="checkmark-done" size={18} color="#D7E3FF" />
-            </View>
+            <Pressable
+              onPress={() => router.back()}
+              style={({ pressed }) => [
+                styles.appIcon,
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Ionicons name="arrow-back" size={18} color="#D7E3FF" />
+            </Pressable>
             <View>
               <Text style={styles.title}>Confirm Intent</Text>
               <Text style={styles.subtitle}>
