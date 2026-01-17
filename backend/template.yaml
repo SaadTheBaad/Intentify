@@ -1,10 +1,10 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Intentify - API (presign, recordings, intents, transcribe (OpenAI), match (OpenAI), speak (OpenAI TTS))
+Description: Intentify - API (presign, recordings, intents, transcribe (OpenAI), match (OpenAI), speak (AWS Polly))
 
 Globals:
   Function:
-    Runtime: nodejs18.x
+    Runtime: nodejs24.x
     Timeout: 30
 
 Parameters:
@@ -25,14 +25,6 @@ Parameters:
     Type: String
     Default: text-embedding-3-small
 
-  OpenAITtsModel:
-    Type: String
-    Default: gpt-4o-mini-tts
-
-  OpenAITtsFormat:
-    Type: String
-    Default: mp3
-
 Resources:
   Api:
     Type: AWS::Serverless::Api
@@ -42,9 +34,14 @@ Resources:
         AllowMethods: "'OPTIONS,GET,POST,DELETE'"
         AllowHeaders: "'Content-Type,Authorization'"
         AllowOrigin: "'*'"
+      Auth:
+        DefaultAuthorizer: NONE
+        AddDefaultAuthorizerToCorsPreflight: false
 
   IntentRecordsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Ref IntentRecordsTableName
       BillingMode: PAY_PER_REQUEST
@@ -188,7 +185,7 @@ Resources:
             Method: DELETE
 
   # --------------------
-  # Transcribe (OpenAI) - synchronous
+  # Transcribe (OpenAI)
   # --------------------
   OpenAITranscribeFunction:
     Type: AWS::Serverless::Function
@@ -242,7 +239,7 @@ Resources:
             Method: POST
 
   # --------------------
-  # Speak (OpenAI TTS) - POST /speak
+  # Speak (AWS Polly) - POST /speak
   # --------------------
   SpeakFunction:
     Type: AWS::Serverless::Function
