@@ -12,6 +12,7 @@ import {
   View
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTheme } from "../../src/context/ThemeContext";
 
 import {
   playRecording,
@@ -22,6 +23,7 @@ import {
 
 export default function RecordScreen() {
   const insets = useSafeAreaInsets();
+  const { theme, toggleTheme, colors, isDark } = useTheme();
   const [isRecording, setIsRecording] = useState(false);
   const [lastUri, setLastUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -144,7 +146,7 @@ export default function RecordScreen() {
 
   return (
     <LinearGradient
-      colors={["#0B1020", "#0E1731", "#0A0F1F"]}
+      colors={colors.bgGradient}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={[
@@ -158,32 +160,52 @@ export default function RecordScreen() {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <View style={styles.appIcon}>
-            <Ionicons name="sparkles" size={18} color="#D7E3FF" />
+          <View style={[styles.appIcon, { backgroundColor: colors.iconBg, borderColor: colors.iconBorder }]}>
+            <Ionicons name="sparkles" size={18} color={isDark ? "#D7E3FF" : "#2D5BD8"} />
           </View>
           <View>
-            <Text style={styles.title}>Intentify</Text>
-            <Text style={styles.subtitle}>Record → confirm intent → upload</Text>
+            <Text style={[styles.title, { color: colors.text }]}>Intentify</Text>
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Record → confirm intent → upload</Text>
           </View>
         </View>
 
-        <View style={[styles.chip, isRecording ? styles.chipLive : styles.chipIdle]}>
-          <View style={[styles.dot, isRecording ? styles.dotLive : styles.dotIdle]} />
-          <Text style={styles.chipText}>{isRecording ? "Recording" : "Ready"}</Text>
+        <View style={styles.headerRight}>
+          <Pressable
+            onPress={toggleTheme}
+            style={({ pressed }) => [
+              styles.themeToggle,
+              { backgroundColor: colors.iconBg, borderColor: colors.iconBorder },
+              pressed && { opacity: 0.7 }
+            ]}
+          >
+            <Ionicons
+              name={isDark ? "sunny" : "moon"}
+              size={18}
+              color={isDark ? "#D7E3FF" : "#2D5BD8"}
+            />
+          </Pressable>
+
+          <View style={[
+            styles.chip,
+            isRecording ? styles.chipLive : { backgroundColor: colors.chipBg, borderColor: colors.chipBorder }
+          ]}>
+            <View style={[styles.dot, isRecording ? styles.dotLive : styles.dotIdle]} />
+            <Text style={[styles.chipText, { color: colors.text }]}>{isRecording ? "Recording" : "Ready"}</Text>
+          </View>
         </View>
       </View>
 
       {/* Main Card */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Tap to record</Text>
-        <Text style={styles.cardHint}>
+      <View style={[styles.card, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+        <Text style={[styles.cardTitle, { color: colors.text }]}>Tap to record</Text>
+        <Text style={[styles.cardHint, { color: colors.textSecondary }]}>
           Keep it short and clear. You’ll review it on the next screen.
         </Text>
 
         <View style={styles.recordZone}>
           {/* Timer */}
           {isRecording && (
-            <Text style={styles.timerText}>{formatTime(elapsedTime)}</Text>
+            <Text style={[styles.timerText, { color: colors.text }]}>{formatTime(elapsedTime)}</Text>
           )}
 
           {/* Pulse ring (only visible while recording) */}
@@ -201,16 +223,16 @@ export default function RecordScreen() {
               onPress={onRecordPress}
               style={({ pressed }) => [
                 styles.recordButton,
-                isRecording ? styles.recordButtonLive : styles.recordButtonIdle,
+                isRecording ? styles.recordButtonLive : { backgroundColor: colors.iconBg, borderColor: colors.iconBorder },
                 pressed && { opacity: 0.9 },
               ]}
             >
               <Ionicons
                 name={isRecording ? "stop" : "mic"}
                 size={28}
-                color={isRecording ? "#FFE9E9" : "#EAF0FF"}
+                color={isRecording ? "#FFE9E9" : (isDark ? "#EAF0FF" : "#2D5BD8")}
               />
-              <Text style={styles.recordButtonText}>
+              <Text style={[styles.recordButtonText, { color: colors.text }]}>
                 {isRecording ? "Stop" : "Record"}
               </Text>
             </Pressable>
@@ -224,41 +246,47 @@ export default function RecordScreen() {
             disabled={!lastUri}
             style={({ pressed }) => [
               styles.actionBtn,
+              { backgroundColor: colors.actionBtnBg, borderColor: colors.actionBtnBorder },
               !lastUri && styles.actionBtnDisabled,
               pressed && lastUri && { opacity: 0.85 },
             ]}
           >
-            <Ionicons name="play" size={18} color={lastUri ? "#D7E3FF" : "#5D6A88"} />
-            <Text style={[styles.actionText, !lastUri && styles.actionTextDisabled]}>
+            <Ionicons name="play" size={18} color={lastUri ? (isDark ? "#D7E3FF" : "#2D5BD8") : (isDark ? "#5D6A88" : "#A0AEC0")} />
+            <Text style={[styles.actionText, { color: colors.text }, !lastUri && styles.actionTextDisabled]}>
               Play
             </Text>
           </Pressable>
 
           <Pressable
             onPress={onStopPress}
-            style={({ pressed }) => [styles.actionBtn, pressed && { opacity: 0.85 }]}
+            style={({ pressed }) => [
+              styles.actionBtn,
+              { backgroundColor: colors.actionBtnBg, borderColor: colors.actionBtnBorder },
+              pressed && { opacity: 0.85 }
+            ]}
           >
-            <Ionicons name="close" size={18} color="#D7E3FF" />
-            <Text style={styles.actionText}>Stop</Text>
+            <Ionicons name="close" size={18} color={isDark ? "#D7E3FF" : "#2D5BD8"} />
+            <Text style={[styles.actionText, { color: colors.text }]}>Stop</Text>
           </Pressable>
         </View>
 
         {/* Info */}
         {lastUri ? (
-          <View style={styles.infoBox}>
-            <Ionicons name="document-text" size={16} color="#BFD2FF" />
-            <Text style={styles.infoText} numberOfLines={2}>
+          <View style={[styles.infoBox, { backgroundColor: colors.infoBg, borderColor: colors.infoBorder }]}>
+            <Ionicons name="document-text" size={16} color={isDark ? "#BFD2FF" : "#2D5BD8"} />
+            <Text style={[styles.infoText, { color: colors.infoText }]} numberOfLines={2}>
               Last saved: {lastUri}
             </Text>
           </View>
         ) : (
-          <View style={styles.infoBox}>
-            <Ionicons name="information-circle" size={16} color="#BFD2FF" />
-            <Text style={styles.infoText}>
+          <View style={[styles.infoBox, { backgroundColor: colors.infoBg, borderColor: colors.infoBorder }]}>
+            <Ionicons name="information-circle" size={16} color={isDark ? "#BFD2FF" : "#2D5BD8"} />
+            <Text style={[styles.infoText, { color: colors.infoText }]}>
               No recording yet. Tap record to begin.
             </Text>
           </View>
         )}
+
 
         {/* Error */}
         {error ? (
@@ -270,7 +298,7 @@ export default function RecordScreen() {
       </View>
 
       {/* Footer */}
-      <Text style={styles.footer}>
+      <Text style={[styles.footer, { color: colors.textSecondary }]}>
         Tip: Record in a quiet spot for best results.
       </Text>
     </LinearGradient>
@@ -294,6 +322,19 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  themeToggle: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   appIcon: {
     width: 36,

@@ -3,27 +3,29 @@ import { useFocusEffect } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useCallback, useMemo, useState } from "react";
 import {
-  Alert,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    Alert,
+    FlatList,
+    Pressable,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTheme } from "../../src/context/ThemeContext";
 
 import {
-  createIntent,
-  deleteIntent,
-  IntentItem,
-  listIntents,
+    createIntent,
+    deleteIntent,
+    IntentItem,
+    listIntents,
 } from "../../src/services/apiService";
 import { getOrCreateDeviceId } from "../../src/services/storageService";
 import { makeIntentId } from "../../src/utils/intent";
 
 export default function IntentsScreen() {
   const insets = useSafeAreaInsets();
+  const { colors, isDark } = useTheme();
 
   const [deviceId, setDeviceId] = useState<string>("");
   const [items, setItems] = useState<IntentItem[]>([]);
@@ -79,7 +81,7 @@ export default function IntentsScreen() {
 
   return (
     <LinearGradient
-      colors={["#0B1020", "#0E1731", "#0A0F1F"]}
+      colors={colors.bgGradient}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={[
@@ -93,12 +95,12 @@ export default function IntentsScreen() {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <View style={styles.appIcon}>
-            <Ionicons name="flash" size={18} color="#D7E3FF" />
+          <View style={[styles.appIcon, { backgroundColor: colors.iconBg, borderColor: colors.iconBorder }]}>
+            <Ionicons name="flash" size={18} color={isDark ? "#D7E3FF" : "#2D5BD8"} />
           </View>
           <View>
-            <Text style={styles.title}>Intents</Text>
-            <Text style={styles.subtitle}>Approved phrases for suggestions</Text>
+            <Text style={[styles.title, { color: colors.text }]}>Intents</Text>
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Approved phrases for suggestions</Text>
           </View>
         </View>
       </View>
@@ -112,15 +114,15 @@ export default function IntentsScreen() {
       ) : null}
 
       {/* Add Card */}
-      <View style={styles.addCard}>
-        <View style={styles.inputWrap}>
-          <Ionicons name="sparkles-outline" size={18} color="rgba(215,227,255,0.75)" />
+      <View style={[styles.addCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+        <View style={[styles.inputWrap, { backgroundColor: colors.chipBg, borderColor: colors.chipBorder }]}>
+          <Ionicons name="sparkles-outline" size={18} color={colors.textSecondary} />
           <TextInput
             value={label}
             onChangeText={setLabel}
             placeholder="Add an intent, e.g. “I need more time to respond”"
-            placeholderTextColor="rgba(234,240,255,0.35)"
-            style={styles.input}
+            placeholderTextColor={isDark ? "rgba(234,240,255,0.35)" : "rgba(0,0,0,0.35)"}
+            style={[styles.input, { color: colors.text }]}
           />
         </View>
 
@@ -129,12 +131,13 @@ export default function IntentsScreen() {
           disabled={!canAdd}
           style={({ pressed }) => [
             styles.addBtn,
+            { backgroundColor: colors.buttonPrimary },
             !canAdd && styles.addBtnDisabled,
             pressed && canAdd && { opacity: 0.9 },
           ]}
         >
-          <Ionicons name="add" size={18} color={canAdd ? "#0B1020" : "rgba(11,16,32,0.55)"} />
-          <Text style={[styles.addBtnText, !canAdd && styles.addBtnTextDisabled]}>
+          <Ionicons name="add" size={18} color={canAdd ? (isDark ? "#0B1020" : "#FFFFFF") : (isDark ? "rgba(11,16,32,0.55)" : "rgba(255,255,255,0.55)")} />
+          <Text style={[styles.addBtnText, { color: isDark ? "#0B1020" : "#FFFFFF" }, !canAdd && styles.addBtnTextDisabled]}>
             Add
           </Text>
         </Pressable>
@@ -146,19 +149,19 @@ export default function IntentsScreen() {
         data={items}
         keyExtractor={(i) => i.intentId}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Ionicons name="flash-outline" size={22} color="rgba(215,227,255,0.55)" />
-            <Text style={styles.emptyTitle}>No intents yet</Text>
-            <Text style={styles.emptyText}>Add a few above to speed up confirmation.</Text>
+          <View style={[styles.empty, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+            <Ionicons name="flash-outline" size={22} color={colors.textSecondary} />
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>No intents yet</Text>
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Add a few above to speed up confirmation.</Text>
           </View>
         }
         renderItem={({ item }) => (
-          <View style={styles.row}>
+          <View style={[styles.row, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
             <View style={styles.rowLeft}>
-              <View style={styles.rowIcon}>
-                <Ionicons name="chatbubble-ellipses-outline" size={16} color="#D7E3FF" />
+              <View style={[styles.rowIcon, { backgroundColor: colors.iconBg, borderColor: colors.iconBorder }]}>
+                <Ionicons name="chatbubble-ellipses-outline" size={16} color={isDark ? "#D7E3FF" : "#2D5BD8"} />
               </View>
-              <Text style={styles.rowLabel} numberOfLines={2}>
+              <Text style={[styles.rowLabel, { color: colors.text }]} numberOfLines={2}>
                 {item.label}
               </Text>
             </View>

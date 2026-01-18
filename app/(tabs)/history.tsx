@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTheme } from "../../src/context/ThemeContext";
 
 import {
   clearHistory,
@@ -76,6 +77,7 @@ function shortKey(key: string, max = 42) {
 
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
+  const { colors, isDark } = useTheme();
 
   const [items, setItems] = useState<UiItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -215,7 +217,7 @@ export default function HistoryScreen() {
 
   return (
     <LinearGradient
-      colors={["#0B1020", "#0E1731", "#0A0F1F"]}
+      colors={colors.bgGradient}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={[
@@ -229,27 +231,35 @@ export default function HistoryScreen() {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <View style={styles.appIcon}>
-            <Ionicons name="time" size={18} color="#D7E3FF" />
+          <View style={[styles.appIcon, { backgroundColor: colors.iconBg, borderColor: colors.iconBorder }]}>
+            <Ionicons name="time" size={18} color={isDark ? "#D7E3FF" : "#2D5BD8"} />
           </View>
           <View>
-            <Text style={styles.title}>History</Text>
-            <Text style={styles.subtitle}>Your recent recordings and intents</Text>
+            <Text style={[styles.title, { color: colors.text }]}>History</Text>
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Your recent recordings and intents</Text>
           </View>
         </View>
 
         <View style={styles.headerActions}>
           <Pressable
             onPress={onStopAudio}
-            style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.85 }]}
+            style={({ pressed }) => [
+              styles.iconBtn,
+              { backgroundColor: colors.iconBg, borderColor: colors.iconBorder },
+              pressed && { opacity: 0.85 }
+            ]}
           >
-            <Ionicons name="square" size={18} color="#D7E3FF" />
-            <Text style={styles.iconBtnText}>Stop</Text>
+            <Ionicons name="square" size={18} color={isDark ? "#D7E3FF" : "#2D5BD8"} />
+            <Text style={[styles.iconBtnText, { color: colors.text }]}>Stop</Text>
           </Pressable>
 
           <Pressable
             onPress={onClear}
-            style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.85 }]}
+            style={({ pressed }) => [
+              styles.iconBtn,
+              { backgroundColor: colors.iconBg, borderColor: colors.iconBorder },
+              pressed && { opacity: 0.85 }
+            ]}
           >
             <Ionicons name="trash" size={18} color="#FFD1D1" />
             <Text style={[styles.iconBtnText, { color: "#FFD1D1" }]}>Clear</Text>
@@ -269,10 +279,10 @@ export default function HistoryScreen() {
         data={items}
         keyExtractor={(item) => `${item.source}:${item.id}`}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Ionicons name="time-outline" size={22} color="rgba(215,227,255,0.55)" />
-            <Text style={styles.emptyTitle}>No history yet</Text>
-            <Text style={styles.emptyText}>Record something on Home to see it here.</Text>
+          <View style={[styles.empty, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+            <Ionicons name="time-outline" size={22} color={colors.textSecondary} />
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>No history yet</Text>
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Record something on Home to see it here.</Text>
           </View>
         }
         renderItem={({ item }) => {
@@ -283,29 +293,29 @@ export default function HistoryScreen() {
           const sourceLabel = item.source === "backend" ? "cloud" : "local";
 
           return (
-            <View style={styles.card}>
+            <View style={[styles.card, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
               <View style={styles.cardTopRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.intent} numberOfLines={1}>
+                  <Text style={[styles.intent, { color: colors.text }]} numberOfLines={1}>
                     {item.intentLabel || "Untitled"}
                   </Text>
 
                   <View style={styles.metaRow}>
-                    <Ionicons name="calendar-outline" size={14} color="rgba(234,240,255,0.65)" />
-                    <Text style={styles.metaText}>{formatWhen(item.createdAt)}</Text>
+                    <Ionicons name="calendar-outline" size={14} color={colors.textSecondary} />
+                    <Text style={[styles.metaText, { color: colors.textSecondary }]}>{formatWhen(item.createdAt)}</Text>
 
-                    <View style={[styles.chip, item.source === "backend" ? styles.chipCloud : styles.chipLocal]}>
+                    <View style={[styles.chip, { backgroundColor: colors.chipBg, borderColor: colors.chipBorder }]}>
                       <Ionicons
                         name={item.source === "backend" ? "cloud-outline" : "phone-portrait-outline"}
                         size={12}
-                        color="#D7E3FF"
+                        color={isDark ? "#D7E3FF" : "#2D5BD8"}
                       />
-                      <Text style={styles.chipText}>{sourceLabel}</Text>
+                      <Text style={[styles.chipText, { color: colors.text }]}>{sourceLabel}</Text>
                     </View>
                   </View>
 
                   {item.s3Key ? (
-                    <Text style={styles.s3} numberOfLines={1}>
+                    <Text style={[styles.s3, { color: colors.textSecondary }]} numberOfLines={1}>
                       {shortKey(item.s3Key)}
                     </Text>
                   ) : null}
@@ -318,12 +328,13 @@ export default function HistoryScreen() {
                   disabled={isBusy}
                   style={({ pressed }) => [
                     styles.actionBtn,
+                    { backgroundColor: colors.actionBtnBg, borderColor: colors.actionBtnBorder },
                     isBusy && styles.actionBtnDisabled,
                     pressed && !isBusy && { opacity: 0.88 },
                   ]}
                 >
-                  <Ionicons name="volume-high" size={18} color="#D7E3FF" />
-                  <Text style={styles.actionText}>
+                  <Ionicons name="volume-high" size={18} color={isDark ? "#D7E3FF" : "#2D5BD8"} />
+                  <Text style={[styles.actionText, { color: colors.text }]}>
                     {isSpeakingThis ? "Speaking…" : "Speak"}
                   </Text>
                 </Pressable>
@@ -333,12 +344,13 @@ export default function HistoryScreen() {
                   disabled={isBusy}
                   style={({ pressed }) => [
                     styles.actionBtn,
+                    { backgroundColor: colors.actionBtnBg, borderColor: colors.actionBtnBorder },
                     isBusy && styles.actionBtnDisabled,
                     pressed && !isBusy && { opacity: 0.88 },
                   ]}
                 >
-                  <Ionicons name="play" size={18} color="#D7E3FF" />
-                  <Text style={styles.actionText}>
+                  <Ionicons name="play" size={18} color={isDark ? "#D7E3FF" : "#2D5BD8"} />
+                  <Text style={[styles.actionText, { color: colors.text }]}>
                     {isPlayingThis ? "Loading…" : "Play"}
                   </Text>
                 </Pressable>

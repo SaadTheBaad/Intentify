@@ -1,32 +1,33 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
-import * as Haptics from "expo-haptics";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Alert,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from "react-native";
 import Animated, {
-  useAnimatedStyle,
-  withSpring,
-  useSharedValue,
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
-  createIntent,
-  createRecording,
-  getPresignedUrl,
-  matchIntents,
-  suggestIntent,
-  transcribeFromS3,
+    createIntent,
+    createRecording,
+    getPresignedUrl,
+    matchIntents,
+    suggestIntent,
+    transcribeFromS3,
 } from "../src/services/apiService";
 import { playRecording, stopPlayback } from "../src/services/audioService";
+import { useTheme } from "../src/context/ThemeContext";
 import { uploadToPresignedUrl } from "../src/services/s3UploadService";
 import { getOrCreateDeviceId, saveHistoryItem } from "../src/services/storageService";
 import { makeIntentId } from "../src/utils/intent";
@@ -68,6 +69,7 @@ function scoreLabel(score: number) {
  */
 export default function ConfirmScreen() {
   const insets = useSafeAreaInsets();
+  const { colors, isDark } = useTheme();
 
   const { uri } = useLocalSearchParams<{ uri?: string }>();
   const safeUri = useMemo(() => (typeof uri === "string" ? uri : null), [uri]);
@@ -346,7 +348,7 @@ export default function ConfirmScreen() {
 
   return (
     <LinearGradient
-      colors={["#0B1020", "#0E1731", "#0A0F1F"]}
+      colors={colors.bgGradient}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={[
@@ -364,27 +366,28 @@ export default function ConfirmScreen() {
             onPress={() => router.back()}
             style={({ pressed }) => [
               styles.backButton,
+              { backgroundColor: colors.iconBg, borderColor: colors.iconBorder },
               pressed && { opacity: 0.7 },
             ]}
           >
-            <Ionicons name="chevron-back" size={24} color="#D7E3FF" />
+            <Ionicons name="chevron-back" size={24} color={isDark ? "#D7E3FF" : "#2D5BD8"} />
           </Pressable>
 
           <View style={styles.headerLeft}>
-            <View style={styles.appIcon}>
-              <Ionicons name="checkmark-done" size={18} color="#D7E3FF" />
+            <View style={[styles.appIcon, { backgroundColor: colors.iconBg, borderColor: colors.iconBorder }]}>
+              <Ionicons name="checkmark-done" size={18} color={isDark ? "#D7E3FF" : "#2D5BD8"} />
             </View>
             <View>
-              <Text style={styles.title}>Confirm Intent</Text>
-              <Text style={styles.subtitle}>Review the audio, then choose the best match.</Text>
+              <Text style={[styles.title, { color: colors.text }]}>Confirm Intent</Text>
+              <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Review the audio, then choose the best match.</Text>
             </View>
           </View>
         </View>
 
         {/* Audio controls */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Audio</Text>
-          <Text style={styles.cardHint}>Play the recording to verify it sounds right.</Text>
+        <View style={[styles.card, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+          <Text style={[styles.cardTitle, { color: colors.text }]}>Audio</Text>
+          <Text style={[styles.cardHint, { color: colors.textSecondary }]}>Play the recording to verify it sounds right.</Text>
 
           <View style={styles.actionsRow}>
             <Pressable
@@ -392,12 +395,13 @@ export default function ConfirmScreen() {
               disabled={!safeUri || isWorking}
               style={({ pressed }) => [
                 styles.actionBtn,
+                { backgroundColor: colors.actionBtnBg, borderColor: colors.actionBtnBorder },
                 (!safeUri || isWorking) && styles.actionBtnDisabled,
                 pressed && !isWorking && safeUri && { opacity: 0.88 },
               ]}
             >
-              <Ionicons name="play" size={18} color="#D7E3FF" />
-              <Text style={styles.actionText}>Play</Text>
+              <Ionicons name="play" size={18} color={isDark ? "#D7E3FF" : "#2D5BD8"} />
+              <Text style={[styles.actionText, { color: colors.text }]}>Play</Text>
             </Pressable>
 
             <Pressable
@@ -405,12 +409,13 @@ export default function ConfirmScreen() {
               disabled={isWorking}
               style={({ pressed }) => [
                 styles.actionBtn,
+                { backgroundColor: colors.actionBtnBg, borderColor: colors.actionBtnBorder },
                 isWorking && styles.actionBtnDisabled,
                 pressed && !isWorking && { opacity: 0.88 },
               ]}
             >
-              <Ionicons name="square" size={18} color="#D7E3FF" />
-              <Text style={styles.actionText}>Stop</Text>
+              <Ionicons name="square" size={18} color={isDark ? "#D7E3FF" : "#2D5BD8"} />
+              <Text style={[styles.actionText, { color: colors.text }]}>Stop</Text>
             </Pressable>
           </View>
 
@@ -419,6 +424,7 @@ export default function ConfirmScreen() {
             disabled={!canGenerate}
             style={({ pressed }) => [
               styles.primaryBtn,
+              { backgroundColor: colors.buttonPrimary },
               !canGenerate && styles.primaryBtnDisabled,
               pressed && canGenerate && { opacity: 0.92 },
             ]}
@@ -426,24 +432,30 @@ export default function ConfirmScreen() {
             <Ionicons
               name={isWorking ? "sparkles" : "sparkles-outline"}
               size={18}
-              color={canGenerate ? "#0B1020" : "rgba(11,16,32,0.55)"}
+              color={canGenerate ? (isDark ? "#0B1020" : "#FFFFFF") : (isDark ? "rgba(11,16,32,0.55)" : "rgba(255,255,255,0.55)")}
             />
-            <Text style={[styles.primaryBtnText, !canGenerate && styles.primaryBtnTextDisabled]}>
+            <Text style={[styles.primaryBtnText, { color: isDark ? "#0B1020" : "#FFFFFF" }, !canGenerate && styles.primaryBtnTextDisabled]}>
               {isWorking ? "Working…" : "Generate Suggestions"}
             </Text>
             <View style={{ width: 18 }} />
           </Pressable>
 
           {status ? (
-            <View style={styles.statusBox}>
+            <View style={[styles.statusBox, { backgroundColor: colors.infoBg, borderColor: colors.infoBorder }]}>
               <View style={{ flex: 1 }}>
                 <View style={styles.statusHeader}>
-                  <Ionicons name="sparkles" size={14} color="#BFD2FF" />
-                  <Text style={styles.statusText}>{status}</Text>
+                  <Ionicons name="sparkles" size={14} color={isDark ? "#BFD2FF" : "#2D5BD8"} />
+                  <Text style={[styles.statusText, { color: colors.text }]}>{status}</Text>
                 </View>
                 {isWorking && !pending && (
-                  <View style={styles.progressBarBg}>
-                    <Animated.View style={[styles.progressBarFill, progressStyle]} />
+                  <View style={[styles.progressBarBg, { backgroundColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)" }]}>
+                    <Animated.View
+                      style={[
+                        styles.progressBarFill,
+                        { backgroundColor: isDark ? "#D7E3FF" : "#2D5BD8" },
+                        progressStyle
+                      ]}
+                    />
                   </View>
                 )}
               </View>
@@ -453,17 +465,17 @@ export default function ConfirmScreen() {
 
         {/* Suggestions */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Suggestions</Text>
-          <Text style={styles.sectionHint}>Tap one to select it.</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Suggestions</Text>
+          <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>Tap one to select it.</Text>
         </View>
 
         {suggestions.length === 0 ? (
-          <View style={styles.empty}>
-            <Ionicons name="flash-outline" size={22} color="rgba(215,227,255,0.55)" />
-            <Text style={styles.emptyTitle}>
+          <View style={[styles.empty, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+            <Ionicons name="flash-outline" size={22} color={colors.textSecondary} />
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>
               {hasRun ? "No matches found" : "Generating automatically…"}
             </Text>
-            <Text style={styles.emptyText}>
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
               {hasRun
                 ? "Add the transcript as a new intent, or manage intents manually."
                 : "If it doesn’t start, tap Generate Suggestions."}
@@ -476,12 +488,13 @@ export default function ConfirmScreen() {
                   disabled={!pending || isWorking}
                   style={({ pressed }) => [
                     styles.secondaryBtn,
+                    { backgroundColor: colors.buttonSecondary, borderColor: colors.cardBorder },
                     (!pending || isWorking) && styles.secondaryBtnDisabled,
                     pressed && pending && !isWorking && { opacity: 0.9 },
                   ]}
                 >
-                  <Ionicons name="add-circle-outline" size={18} color="#D7E3FF" />
-                  <Text style={styles.secondaryBtnText}>Add transcript as intent</Text>
+                  <Ionicons name="add-circle-outline" size={18} color={isDark ? "#D7E3FF" : "#2D5BD8"} />
+                  <Text style={[styles.secondaryBtnText, { color: colors.text }]}>Add transcript as intent</Text>
                 </Pressable>
 
                 <Pressable
@@ -489,12 +502,13 @@ export default function ConfirmScreen() {
                   disabled={isWorking}
                   style={({ pressed }) => [
                     styles.secondaryBtn,
+                    { backgroundColor: colors.buttonSecondary, borderColor: colors.cardBorder },
                     isWorking && styles.secondaryBtnDisabled,
                     pressed && !isWorking && { opacity: 0.9 },
                   ]}
                 >
-                  <Ionicons name="list" size={18} color="#D7E3FF" />
-                  <Text style={styles.secondaryBtnText}>Go to intents</Text>
+                  <Ionicons name="list" size={18} color={isDark ? "#D7E3FF" : "#2D5BD8"} />
+                  <Text style={[styles.secondaryBtnText, { color: colors.text }]}>Go to intents</Text>
                 </Pressable>
               </View>
             ) : null}
@@ -512,29 +526,30 @@ export default function ConfirmScreen() {
                   disabled={isWorking}
                   style={({ pressed }) => [
                     styles.suggCard,
-                    active && styles.suggCardActive,
-                    s.isAi && styles.suggCardAi,
+                    { backgroundColor: colors.cardBg, borderColor: colors.cardBorder },
+                    active && [styles.suggCardActive, { backgroundColor: isDark ? "rgba(215,227,255,0.10)" : "rgba(45,91,216,0.10)", borderColor: isDark ? "rgba(215,227,255,0.18)" : "rgba(45,91,216,0.18)" }],
+                    s.isAi && [styles.suggCardAi, { backgroundColor: isDark ? "rgba(147,112,219,0.08)" : "rgba(147,112,219,0.15)", borderColor: isDark ? "rgba(147,112,219,0.20)" : "rgba(147,112,219,0.30)" }],
                     isWorking && { opacity: 0.6 },
                     pressed && !isWorking && { opacity: 0.92 },
                   ]}
                 >
                   <View style={styles.suggTopRow}>
                     <View style={styles.radio}>
-                      {active ? <View style={styles.radioDot} /> : <View style={styles.radioHollow} />}
+                      {active ? <View style={[styles.radioDot, { backgroundColor: isDark ? "rgba(215,227,255,0.90)" : "#2D5BD8" }]} /> : <View style={[styles.radioHollow, { borderColor: isDark ? "rgba(215,227,255,0.30)" : "rgba(0,0,0,0.30)" }]} />}
                     </View>
 
-                    <Text style={styles.suggLabel} numberOfLines={2}>
+                    <Text style={[styles.suggLabel, { color: colors.text }]} numberOfLines={2}>
                       {s.label}
                     </Text>
 
-                    <View style={[styles.scorePill, s.isAi && styles.scorePillAi]}>
+                    <View style={[styles.scorePill, s.isAi && styles.scorePillAi, { backgroundColor: colors.chipBg, borderColor: colors.chipBorder }]}>
                       {s.isAi ? (
                         <>
-                          <Ionicons name="sparkles" size={11} color="#D7E3FF" />
-                          <Text style={styles.scorePillText}>AI Suggested</Text>
+                          <Ionicons name="sparkles" size={11} color={isDark ? "#D7E3FF" : "#2D5BD8"} />
+                          <Text style={[styles.scorePillText, { color: colors.textSecondary }]}>AI Suggested</Text>
                         </>
                       ) : (
-                        <Text style={styles.scorePillText}>
+                        <Text style={[styles.scorePillText, { color: colors.textSecondary }]}>
                           {strength} • {s.score.toFixed(3)}
                         </Text>
                       )}
@@ -554,6 +569,7 @@ export default function ConfirmScreen() {
           disabled={!canConfirm}
           style={({ pressed }) => [
             styles.confirmBtn,
+            { backgroundColor: colors.buttonPrimary },
             !canConfirm && styles.confirmBtnDisabled,
             pressed && canConfirm && { opacity: 0.92 },
           ]}
@@ -561,9 +577,9 @@ export default function ConfirmScreen() {
           <Ionicons
             name="checkmark-circle"
             size={20}
-            color={canConfirm ? "#0B1020" : "rgba(11,16,32,0.55)"}
+            color={canConfirm ? (isDark ? "#0B1020" : "#FFFFFF") : (isDark ? "rgba(11,16,32,0.55)" : "rgba(255,255,255,0.55)")}
           />
-          <Text style={[styles.confirmText, !canConfirm && styles.confirmTextDisabled]}>
+          <Text style={[styles.confirmText, { color: isDark ? "#0B1020" : "#FFFFFF" }, !canConfirm && styles.confirmTextDisabled]}>
             {isWorking ? "Saving…" : "Confirm"}
           </Text>
         </Pressable>

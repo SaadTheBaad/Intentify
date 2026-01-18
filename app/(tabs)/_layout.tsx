@@ -1,22 +1,23 @@
 import { Ionicons } from "@expo/vector-icons";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { BlurView } from "expo-blur";
-import { Tabs } from "expo-router";
 import * as Haptics from "expo-haptics";
-import React, { useEffect, useRef, useState } from "react";
+import { Tabs } from "expo-router";
+import { useEffect, useState } from "react";
 import {
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    View,
 } from "react-native";
 import Animated, {
-  useAnimatedStyle,
-  withSpring,
-  useSharedValue,
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTheme } from "../../src/context/ThemeContext";
 
 function iconFor(routeName: string, focused: boolean) {
   switch (routeName) {
@@ -33,6 +34,7 @@ function iconFor(routeName: string, focused: boolean) {
 
 function PremiumTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const { colors, isDark } = useTheme();
   const [containerWidth, setContainerWidth] = useState(0);
   const translateX = useSharedValue(0);
 
@@ -67,14 +69,14 @@ function PremiumTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         },
       ]}
     >
-      <BlurView intensity={28} tint="dark" style={styles.blur}>
+      <BlurView intensity={28} tint={isDark ? "dark" : "light"} style={[styles.blur, { backgroundColor: isDark ? "rgba(10,16,32,0.55)" : "rgba(255,255,255,0.75)", borderColor: isDark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.10)" }]}>
         <View
           style={styles.inner}
           onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width - 16)}
         >
           {/* Animated Background Pill */}
           {containerWidth > 0 && (
-            <Animated.View style={[styles.activePill, animatedStyle]} />
+            <Animated.View style={[styles.activePill, animatedStyle, { backgroundColor: isDark ? "rgba(215,227,255,0.30)" : "rgba(45,91,216,0.20)", borderColor: isDark ? "rgba(215,227,255,0.60)" : "rgba(45,91,216,0.40)" }]} />
           )}
 
           {state.routes.map((route, index) => {
@@ -128,6 +130,7 @@ function TabItem({
   focused: boolean;
   onPress: () => void;
 }) {
+  const { colors, isDark } = useTheme();
   const scale = useSharedValue(1);
 
   useEffect(() => {
@@ -143,8 +146,8 @@ function TabItem({
     };
   });
 
-  const iconColor = focused ? "#EAF0FF" : "rgba(215,227,255,0.50)";
-  const textColor = focused ? "#D7E3FF" : "rgba(215,227,255,0.45)";
+  const iconColor = focused ? (isDark ? "#EAF0FF" : "#2D5BD8") : (isDark ? "rgba(215,227,255,0.50)" : "rgba(0,0,0,0.40)");
+  const textColor = focused ? (isDark ? "#D7E3FF" : "#2D5BD8") : (isDark ? "rgba(215,227,255,0.45)" : "rgba(0,0,0,0.35)");
 
   return (
     <Pressable onPress={onPress} style={styles.itemPressable}>
