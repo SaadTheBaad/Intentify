@@ -12,12 +12,6 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { playRecording, stopPlayback } from "../src/services/audioService";
-import {
-  getOrCreateDeviceId,
-  saveHistoryItem,
-} from "../src/services/storageService";
-
 import {
   createIntent,
   createRecording,
@@ -26,29 +20,57 @@ import {
   suggestIntent,
   transcribeFromS3,
 } from "../src/services/apiService";
+import { playRecording, stopPlayback } from "../src/services/audioService";
+import { uploadToPresignedUrl } from "../src/services/s3UploadService";
+import { getOrCreateDeviceId, saveHistoryItem } from "../src/services/storageService";
 import { makeIntentId } from "../src/utils/intent";
 
-import { uploadToPresignedUrl } from "../src/services/s3UploadService";
-
-type Suggestion = { 
-  intentId: string; 
-  label: string; 
+type Suggestion = {
+  intentId: string;
+  label: string;
   score: number;
   isAi?: boolean;
 };
 
+type PendingRecording = {
+  deviceId: string;
+  recordingId: string;
+  createdAt: string;
+  s3Key: string;
+  transcript: string;
+};
+
+const LOW_SCORE_THRESHOLD = 0.35;
+const TOP_K = 3;
+
 function scoreLabel(score: number) {
   if (score >= 0.6) return "High";
-  if (score >= 0.35) return "Medium";
+  if (score >= LOW_SCORE_THRESHOLD) return "Medium";
   return "Low";
 }
 
+/**
+ * confirm.tsx
+ *
+ * This screen runs the full "Intentify pipeline" when it receives an audio `uri`:
+ * 1) presign PUT
+ * 2) upload audio to S3
+ * 3) transcribe from S3
+ * 4) match transcript against saved intents (embeddings + cosine)
+ * 5) if no match / low confidence -> request AI "suggest intent"
+ * 6) user confirms intent; optionally creates new intent; saves recording + local history
+ */
 export default function ConfirmScreen() {
   const insets = useSafeAreaInsets();
 
   const { uri } = useLocalSearchParams<{ uri?: string }>();
   const safeUri = useMemo(() => (typeof uri === "string" ? uri : null), [uri]);
+
+  // Prevent re-running the pipeline if the screen re-renders with the same URI.
   const lastAutoUri = useRef<string | null>(null);
+
+  // Guard against state updates from stale async runs (e.g., user navigates away).
+  const runIdRef = useRef(0);
 
   const [status, setStatus] = useState<string | null>(null);
   const [isWorking, setIsWorking] = useState(false);
@@ -57,13 +79,7 @@ export default function ConfirmScreen() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const [pending, setPending] = useState<{
-    deviceId: string;
-    recordingId: string;
-    createdAt: string;
-    s3Key: string;
-    transcript: string;
-  } | null>(null);
+  const [pending, setPending] = useState<PendingRecording | null>(null);
 
   const onPlay = async () => {
     if (!safeUri) return;
@@ -74,28 +90,50 @@ export default function ConfirmScreen() {
     await stopPlayback();
   };
 
-  const runPipeline = async () => {
-    if (!safeUri) return;
-
-    setIsWorking(true);
+  function resetUiForRun() {
     setStatus(null);
     setSuggestions([]);
     setSelectedId(null);
     setPending(null);
     setHasRun(false);
+  }
+
+  const runPipeline = async () => {
+    if (!safeUri) return;
+
+    const myRunId = ++runIdRef.current;
+
+    setIsWorking(true);
+    resetUiForRun();
+
+    const setStatusSafe = (msg: string) => {
+      if (runIdRef.current === myRunId) setStatus(msg);
+    };
+    const setSuggestionsSafe = (next: Suggestion[]) => {
+      if (runIdRef.current === myRunId) setSuggestions(next);
+    };
+    const setSelectedSafe = (id: string | null) => {
+      if (runIdRef.current === myRunId) setSelectedId(id);
+    };
+    const setPendingSafe = (p: PendingRecording | null) => {
+      if (runIdRef.current === myRunId) setPending(p);
+    };
+    const setHasRunSafe = (v: boolean) => {
+      if (runIdRef.current === myRunId) setHasRun(v);
+    };
 
     try {
       const deviceId = await getOrCreateDeviceId();
       const recordingId = `${Date.now()}`;
       const createdAt = new Date().toISOString();
 
-      setStatus("Getting upload URL…");
+      setStatusSafe("Getting upload URL…");
       const { uploadUrl, key } = await getPresignedUrl(deviceId);
 
-      setStatus("Uploading audio…");
+      setStatusSafe("Uploading audio…");
       await uploadToPresignedUrl(uploadUrl, safeUri);
 
-      setStatus("Transcribing…");
+      setStatusSafe("Transcribing…");
       const tRes = await transcribeFromS3(deviceId, key);
       const transcript = (tRes.transcript || "").trim();
 
@@ -103,45 +141,53 @@ export default function ConfirmScreen() {
         throw new Error("No transcript returned (try recording again).");
       }
 
-      setStatus("Finding best intent…");
-      const matchRes = await matchIntents(deviceId, transcript, 3);
+      setStatusSafe("Finding best intent…");
+      const matchRes = await matchIntents(deviceId, transcript, TOP_K);
+      const matched = (matchRes.suggestions || []).filter(
+        (s) => typeof s.score === "number" && !!s.label && !!s.intentId
+      );
 
-      const sugg = matchRes.suggestions || [];
-      const LOW_SCORE_THRESHOLD = 0.35;
-      
-      // Check if we need AI suggestion: no matches or all scores too low
-      const needsAiSuggestion = 
-        sugg.length === 0 || 
-        sugg.every(s => s.score < LOW_SCORE_THRESHOLD);
+      const needsAiSuggestion =
+        matched.length === 0 || matched.every((s) => s.score < LOW_SCORE_THRESHOLD);
 
       if (needsAiSuggestion) {
-        setStatus("Generating AI suggestion…");
+        setStatusSafe("Generating AI suggestion…");
         const aiRes = await suggestIntent(transcript);
-        
-        // Create a synthetic suggestion with the AI-generated intent
+
+        const label = (aiRes?.suggestion?.label || "").trim();
+        if (!label) {
+          throw new Error("AI returned an empty suggestion.");
+        }
+
         const aiIntentId = `ai-suggestion-${Date.now()}`;
-        const aiSuggestions: Suggestion[] = [{
-          intentId: aiIntentId,
-          label: aiRes.suggestion.label,
-          score: 0,
-          isAi: true
-        }];
-        
-        setSuggestions(aiSuggestions);
-        setSelectedId(aiIntentId);
+        const aiSuggestions: Suggestion[] = [
+          { intentId: aiIntentId, label, score: 0, isAi: true },
+        ];
+
+        setSuggestionsSafe(aiSuggestions);
+        setSelectedSafe(aiIntentId);
       } else {
-        setSuggestions(sugg);
-        if (sugg.length > 0) setSelectedId(sugg[0].intentId);
+        setSuggestionsSafe(matched);
+        setSelectedSafe(matched[0]?.intentId ?? null);
       }
 
-      setPending({ deviceId, recordingId, createdAt, s3Key: key, transcript });
+      setPendingSafe({
+        deviceId,
+        recordingId,
+        createdAt,
+        s3Key: key,
+        transcript,
+      });
 
-      setHasRun(true);
-      setStatus(needsAiSuggestion 
-        ? "AI suggested an intent for you. Review and Confirm!" 
-        : "Pick the best match, then Confirm!");
+      setHasRunSafe(true);
+      setStatusSafe(
+        needsAiSuggestion
+          ? "AI suggested an intent for you. Review and Confirm!"
+          : "Pick the best match, then Confirm!"
+      );
     } finally {
-      setIsWorking(false);
+      // Only end "working" state if this is still the latest run.
+      if (runIdRef.current === myRunId) setIsWorking(false);
     }
   };
 
@@ -150,16 +196,24 @@ export default function ConfirmScreen() {
       await runPipeline();
     } catch (e: any) {
       Alert.alert("Failed", e?.message ?? "Unknown error");
+      // Keep UI in a known state after errors.
       setStatus(null);
       setPending(null);
       setSuggestions([]);
       setSelectedId(null);
+      setHasRun(true);
       setIsWorking(false);
     }
   };
 
+  /**
+   * Confirmation rules:
+   * - If user picked AI suggestion: create new intent first (dedupe by normalized ID).
+   * - Save local history for UX.
+   * - Save recording metadata to DynamoDB.
+   */
   const onConfirm = async () => {
-    if (!pending || !selectedId) return;
+    if (!pending || !selectedId || !safeUri) return;
 
     const selected = suggestions.find((s) => s.intentId === selectedId);
     if (!selected) return;
@@ -168,43 +222,45 @@ export default function ConfirmScreen() {
       setIsWorking(true);
       setStatus("Saving…");
 
-      // If this is an AI-generated suggestion, create it as a new intent first
       let finalIntentId = selected.intentId;
+      let finalIntentLabel = selected.label;
+
       if (selected.isAi) {
+        // Turn the AI label into a stable intentId, so future matches are consistent.
         const newIntentId = makeIntentId(selected.label);
-        
-        // Check if this intent already exists (avoid duplicates)
-        const existingMatch = suggestions.find(
-          s => !s.isAi && makeIntentId(s.label) === newIntentId
+
+        // Deduplicate: if the same label already exists as a real intent, reuse it.
+        // NOTE: This only dedupes against *current* suggestions list.
+        const existing = suggestions.find(
+          (s) => !s.isAi && makeIntentId(s.label) === newIntentId
         );
-        
-        if (!existingMatch) {
+
+        if (existing) {
+          finalIntentId = existing.intentId;
+          finalIntentLabel = existing.label;
+        } else {
           setStatus("Adding AI-suggested intent…");
           await createIntent(pending.deviceId, newIntentId, selected.label);
-        } else {
-          // Use the existing intent ID instead
-          finalIntentId = existingMatch.intentId;
-        }
-        
-        if (!existingMatch) {
           finalIntentId = newIntentId;
         }
       }
 
+      // Local UX history (fast + works offline)
       await saveHistoryItem({
         id: pending.recordingId,
         createdAt: pending.createdAt,
-        audioUri: safeUri || "",
+        audioUri: safeUri,
         intentId: finalIntentId,
-        intentLabel: selected.label,
+        intentLabel: finalIntentLabel,
         s3Key: pending.s3Key,
       });
 
+      // Backend record (source of truth)
       await createRecording({
         deviceId: pending.deviceId,
         recordingId: pending.recordingId,
         s3Key: pending.s3Key,
-        confirmedIntent: selected.label,
+        confirmedIntent: finalIntentLabel,
         createdAt: pending.createdAt,
         transcript: pending.transcript,
       });
@@ -221,6 +277,7 @@ export default function ConfirmScreen() {
 
   const onAddFromTranscript = async () => {
     if (!pending) return;
+
     const label = pending.transcript.trim();
     if (!label) {
       Alert.alert("No transcript", "Record again to generate a transcript.");
@@ -234,9 +291,10 @@ export default function ConfirmScreen() {
       const intentId = makeIntentId(label);
       await createIntent(pending.deviceId, intentId, label);
 
-      const next = [{ intentId, label, score: 1 }];
+      const next: Suggestion[] = [{ intentId, label, score: 1 }];
       setSuggestions(next);
       setSelectedId(intentId);
+
       setStatus("Intent added. Review and Confirm!");
     } catch (e: any) {
       Alert.alert("Add failed", e?.message ?? "Unknown error");
@@ -252,6 +310,7 @@ export default function ConfirmScreen() {
   useEffect(() => {
     if (!safeUri) return;
     if (lastAutoUri.current === safeUri) return;
+
     lastAutoUri.current = safeUri;
     onGenerateSuggestions();
   }, [safeUri]);
@@ -269,10 +328,7 @@ export default function ConfirmScreen() {
         },
       ]}
     >
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: 110 }}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView contentContainerStyle={{ paddingBottom: 110 }} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.headerRow}>
           <View style={styles.headerLeft}>
@@ -281,9 +337,7 @@ export default function ConfirmScreen() {
             </View>
             <View>
               <Text style={styles.title}>Confirm Intent</Text>
-              <Text style={styles.subtitle}>
-                Review the audio, then choose the best match.
-              </Text>
+              <Text style={styles.subtitle}>Review the audio, then choose the best match.</Text>
             </View>
           </View>
         </View>
@@ -291,9 +345,7 @@ export default function ConfirmScreen() {
         {/* Audio controls */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Audio</Text>
-          <Text style={styles.cardHint}>
-            Play the recording to verify it sounds right.
-          </Text>
+          <Text style={styles.cardHint}>Play the recording to verify it sounds right.</Text>
 
           <View style={styles.actionsRow}>
             <Pressable
@@ -337,12 +389,7 @@ export default function ConfirmScreen() {
               size={18}
               color={canGenerate ? "#0B1020" : "rgba(11,16,32,0.55)"}
             />
-            <Text
-              style={[
-                styles.primaryBtnText,
-                !canGenerate && styles.primaryBtnTextDisabled,
-              ]}
-            >
+            <Text style={[styles.primaryBtnText, !canGenerate && styles.primaryBtnTextDisabled]}>
               {isWorking ? "Working…" : "Generate Suggestions"}
             </Text>
             <View style={{ width: 18 }} />
@@ -364,11 +411,7 @@ export default function ConfirmScreen() {
 
         {suggestions.length === 0 ? (
           <View style={styles.empty}>
-            <Ionicons
-              name="flash-outline"
-              size={22}
-              color="rgba(215,227,255,0.55)"
-            />
+            <Ionicons name="flash-outline" size={22} color="rgba(215,227,255,0.55)" />
             <Text style={styles.emptyTitle}>
               {hasRun ? "No matches found" : "Generating automatically…"}
             </Text>
@@ -390,9 +433,7 @@ export default function ConfirmScreen() {
                   ]}
                 >
                   <Ionicons name="add-circle-outline" size={18} color="#D7E3FF" />
-                  <Text style={styles.secondaryBtnText}>
-                    Add transcript as intent
-                  </Text>
+                  <Text style={styles.secondaryBtnText}>Add transcript as intent</Text>
                 </Pressable>
 
                 <Pressable
@@ -431,11 +472,7 @@ export default function ConfirmScreen() {
                 >
                   <View style={styles.suggTopRow}>
                     <View style={styles.radio}>
-                      {active ? (
-                        <View style={styles.radioDot} />
-                      ) : (
-                        <View style={styles.radioHollow} />
-                      )}
+                      {active ? <View style={styles.radioDot} /> : <View style={styles.radioHollow} />}
                     </View>
 
                     <Text style={styles.suggLabel} numberOfLines={2}>
@@ -463,12 +500,7 @@ export default function ConfirmScreen() {
       </ScrollView>
 
       {/* Bottom Confirm CTA */}
-      <View
-        style={[
-          styles.bottomBar,
-          { paddingBottom: Math.max(insets.bottom, 14) },
-        ]}
-      >
+      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 14) }]}>
         <Pressable
           onPress={onConfirm}
           disabled={!canConfirm}
@@ -483,12 +515,7 @@ export default function ConfirmScreen() {
             size={20}
             color={canConfirm ? "#0B1020" : "rgba(11,16,32,0.55)"}
           />
-          <Text
-            style={[
-              styles.confirmText,
-              !canConfirm && styles.confirmTextDisabled,
-            ]}
-          >
+          <Text style={[styles.confirmText, !canConfirm && styles.confirmTextDisabled]}>
             {isWorking ? "Saving…" : "Confirm"}
           </Text>
         </Pressable>
@@ -520,8 +547,6 @@ const styles = StyleSheet.create({
   },
   title: { color: "#EAF0FF", fontSize: 20, fontWeight: "900" },
   subtitle: { color: "rgba(234,240,255,0.60)", fontSize: 12, marginTop: 2 },
-
-  // (chip styles left in case you reuse later)
 
   card: {
     marginTop: 18,
