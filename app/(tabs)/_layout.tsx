@@ -3,7 +3,7 @@ import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import { Tabs } from "expo-router";
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import {
   Animated,
   LayoutAnimation,
@@ -15,6 +15,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ThemeColors, useTheme } from "../../src/theme/theme";
 
 // Enable LayoutAnimation on Android
 if (
@@ -37,8 +38,15 @@ function iconFor(routeName: string, focused: boolean) {
   }
 }
 
+function useTabStyles() {
+  const { colors, mode } = useTheme();
+  return useMemo(() => makeStyles(colors, mode), [colors, mode]);
+}
+
 function PremiumTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const { mode } = useTheme();
+  const styles = useTabStyles();
 
   return (
     <View
@@ -50,7 +58,11 @@ function PremiumTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         },
       ]}
     >
-      <BlurView intensity={40} tint="dark" style={styles.blur}>
+      <BlurView
+        intensity={mode === "dark" ? 40 : 30}
+        tint={mode === "dark" ? "dark" : "light"}
+        style={styles.blur}
+      >
         <View style={styles.inner}>
           {state.routes.map((route, index) => {
             const { options } = descriptors[route.key];
@@ -110,6 +122,8 @@ function TabItem({
   focused: boolean;
   onPress: () => void;
 }) {
+  const styles = useTabStyles();
+  const { colors, mode } = useTheme();
   // We only animate opacity/scale here. Width is handled by LayoutAnimation in the parent.
   const animValue = useRef(new Animated.Value(0)).current;
 
@@ -121,8 +135,9 @@ function TabItem({
     }).start();
   }, [focused, animValue]);
 
-  const activeColor = "#EAF0FF";
-  const inactiveColor = "rgba(215,227,255,0.5)";
+  const activeColor = colors.text;
+  const inactiveColor =
+    mode === "dark" ? "rgba(215,227,255,0.5)" : "rgba(11,16,32,0.5)";
 
   return (
     <Pressable
@@ -172,61 +187,69 @@ export default function TabsLayout() {
   );
 }
 
-const styles = StyleSheet.create({
-  wrapper: {
-    position: "absolute",
-    left: 20,
-    right: 20,
-    bottom: 0,
-    alignItems: "center", // Center the blur view horizontally
-  },
-  blur: {
-    borderRadius: 30,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)", // Slightly more visible border
-    backgroundColor: "rgba(10,16,32,0.6)", // Darker glass
-    width: "100%",
-    // Enhanced shadows for depth
-    shadowColor: "#000",
-    shadowOpacity: 0.4,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 20,
-  },
-  inner: {
-    flexDirection: "row",
-    padding: 6,
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  itemPressable: {
-    justifyContent: "center",
-    alignItems: "center",
-    height: 50,
-    borderRadius: 25,
-  },
-  // Dynamic widths for expansion effect
-  itemPressableActive: {
-    flex: 2, // Takes up more space
-  },
-  itemPressableInactive: {
-    flex: 1, // Takes up less space
-  },
-  item: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
-    width: "100%",
-    borderRadius: 24,
-  },
-  itemActive: {
-    backgroundColor: "rgba(215,227,255,0.15)",
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: "600",
-    letterSpacing: 0.3,
-  },
-});
+const makeStyles = (colors: ThemeColors, mode: "light" | "dark") => {
+  const shellBorder =
+    mode === "dark" ? "rgba(255,255,255,0.12)" : "rgba(15,23,42,0.12)";
+  const shellFill =
+    mode === "dark" ? "rgba(10,16,32,0.6)" : "rgba(255,255,255,0.75)";
+  const activeFill =
+    mode === "dark" ? "rgba(215,227,255,0.15)" : "rgba(47,111,237,0.16)";
+
+  return StyleSheet.create({
+    wrapper: {
+      position: "absolute",
+      left: 20,
+      right: 20,
+      bottom: 0,
+      alignItems: "center",
+    },
+    blur: {
+      borderRadius: 30,
+      overflow: "hidden",
+      borderWidth: 1,
+      borderColor: shellBorder,
+      backgroundColor: shellFill,
+      width: "100%",
+      shadowColor: "#000",
+      shadowOpacity: 0.4,
+      shadowRadius: 20,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 20,
+    },
+    inner: {
+      flexDirection: "row",
+      padding: 6,
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    itemPressable: {
+      justifyContent: "center",
+      alignItems: "center",
+      height: 50,
+      borderRadius: 25,
+    },
+    itemPressableActive: {
+      flex: 2,
+    },
+    itemPressableInactive: {
+      flex: 1,
+    },
+    item: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      height: "100%",
+      width: "100%",
+      borderRadius: 24,
+    },
+    itemActive: {
+      backgroundColor: activeFill,
+    },
+    label: {
+      fontSize: 13,
+      fontWeight: "600",
+      letterSpacing: 0.3,
+      color: colors.text,
+    },
+  });
+};

@@ -23,20 +23,13 @@ import {
 } from "../../src/services/apiService";
 import { getOrCreateDeviceId } from "../../src/services/storageService";
 import { makeIntentId } from "../../src/utils/intent";
-
-// Match the design language of your other screens
-const COLORS = {
-  bg: ["#0B1020", "#0E1731", "#0A0F1F"],
-  text: "#EAF0FF",
-  textDim: "rgba(234,240,255,0.5)",
-  accent: "#8FD0FF", // Sky blue accent
-  danger: "#FFD1D1",
-  glassFill: "rgba(255,255,255,0.04)",
-  glassBorder: "rgba(255,255,255,0.08)",
-};
+import { ThemeColors, useTheme } from "../../src/theme/theme";
 
 export default function IntentsScreen() {
   const insets = useSafeAreaInsets();
+  const { colors, mode } = useTheme();
+  const styles = useMemo(() => makeStyles(colors, mode), [colors, mode]);
+  const primaryTextColor = mode === "dark" ? "#0B1020" : "#F8FAFF";
   const [deviceId, setDeviceId] = useState<string>("");
   const [items, setItems] = useState<IntentItem[]>([]);
   const [label, setLabel] = useState("");
@@ -93,7 +86,7 @@ export default function IntentsScreen() {
   };
 
   return (
-    <LinearGradient colors={COLORS.bg as any} style={styles.container}>
+    <LinearGradient colors={colors.background as any} style={styles.container}>
       {/* Background Atmosphere */}
       <View style={styles.atmosphere}>
         <View style={styles.meshA} />
@@ -122,12 +115,12 @@ export default function IntentsScreen() {
 
               <View style={styles.addCard}>
                 <View style={styles.inputWrap}>
-                  <Ionicons name="sparkles" size={16} color={COLORS.accent} />
+                  <Ionicons name="sparkles" size={16} color={colors.accent} />
                   <TextInput
                     value={label}
                     onChangeText={setLabel}
                     placeholder="E.g. I need a glass of water"
-                    placeholderTextColor="rgba(234,240,255,0.25)"
+                    placeholderTextColor={colors.textSoft}
                     style={styles.input}
                     returnKeyType="done"
                     onSubmitEditing={onAdd}
@@ -146,7 +139,7 @@ export default function IntentsScreen() {
                   <Ionicons
                     name={isAdding ? "ellipsis-horizontal" : "add"}
                     size={20}
-                    color="#0B1020"
+                    color={primaryTextColor}
                   />
                   <Text style={styles.addBtnText}>
                     {isAdding ? "Saving" : "Add Intent"}
@@ -164,7 +157,7 @@ export default function IntentsScreen() {
               <Ionicons
                 name="chatbubbles-outline"
                 size={32}
-                color={COLORS.textDim}
+                color={colors.textDim}
               />
               <Text style={styles.emptyTitle}>No saved intents</Text>
               <Text style={styles.emptyText}>
@@ -179,7 +172,7 @@ export default function IntentsScreen() {
                   <Ionicons
                     name="chatbubble-outline"
                     size={16}
-                    color={COLORS.accent}
+                    color={colors.accent}
                   />
                 </View>
                 <Text style={styles.rowLabel} numberOfLines={2}>
@@ -197,7 +190,7 @@ export default function IntentsScreen() {
                 <Ionicons
                   name="trash-outline"
                   size={18}
-                  color={COLORS.danger}
+                  color={colors.danger}
                 />
               </Pressable>
             </View>
@@ -208,7 +201,26 @@ export default function IntentsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors, mode: "light" | "dark") => {
+  const meshA =
+    mode === "dark" ? "rgba(143,208,255,0.05)" : "rgba(47,111,237,0.08)";
+  const meshB =
+    mode === "dark" ? "rgba(128,152,255,0.03)" : "rgba(120,140,200,0.06)";
+  const cardFill =
+    mode === "dark" ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.7)";
+  const cardBorder =
+    mode === "dark" ? "rgba(255,255,255,0.08)" : "rgba(11,16,32,0.08)";
+  const inputFill =
+    mode === "dark" ? "rgba(0,0,0,0.2)" : "rgba(11,16,32,0.04)";
+  const inputBorder =
+    mode === "dark" ? "rgba(255,255,255,0.05)" : "rgba(11,16,32,0.08)";
+  const rowFill =
+    mode === "dark" ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.8)";
+  const rowBorder =
+    mode === "dark" ? "rgba(255,255,255,0.08)" : "rgba(11,16,32,0.08)";
+  const primaryText = mode === "dark" ? "#0B1020" : "#F8FAFF";
+
+  return StyleSheet.create({
   container: { flex: 1 },
   atmosphere: { ...StyleSheet.absoluteFillObject, overflow: "hidden" },
   meshA: {
@@ -218,7 +230,7 @@ const styles = StyleSheet.create({
     width: 250,
     height: 250,
     borderRadius: 125,
-    backgroundColor: "rgba(143,208,255,0.05)",
+    backgroundColor: meshA,
   },
   meshB: {
     position: "absolute",
@@ -227,30 +239,30 @@ const styles = StyleSheet.create({
     width: 300,
     height: 300,
     borderRadius: 150,
-    backgroundColor: "rgba(128,152,255,0.03)",
+    backgroundColor: meshB,
   },
   listContent: { paddingHorizontal: 20 },
   header: { marginBottom: 20 },
   title: {
     fontSize: 32,
     fontWeight: "900",
-    color: COLORS.text,
+    color: colors.text,
     letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: 14,
-    color: COLORS.textDim,
+    color: colors.textDim,
     marginTop: 4,
     lineHeight: 20,
   },
 
   addCard: {
     marginTop: 24,
-    backgroundColor: "rgba(255,255,255,0.03)",
+    backgroundColor: cardFill,
     borderRadius: 24,
     padding: 16,
     borderWidth: 1,
-    borderColor: COLORS.glassBorder,
+    borderColor: cardBorder,
     gap: 12,
   },
   inputWrap: {
@@ -260,13 +272,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     height: 52,
     borderRadius: 16,
-    backgroundColor: "rgba(0,0,0,0.2)",
+    backgroundColor: inputFill,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.05)",
+    borderColor: inputBorder,
   },
   input: {
     flex: 1,
-    color: COLORS.text,
+    color: colors.text,
     fontSize: 15,
     fontWeight: "600",
   },
@@ -274,52 +286,53 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     height: 52,
     borderRadius: 16,
-    backgroundColor: COLORS.accent,
+    backgroundColor: colors.accent,
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
   },
   addBtnDisabled: {
-    backgroundColor: "rgba(143,208,255,0.2)",
+    backgroundColor: mode === "dark" ? "rgba(143,208,255,0.2)" : "rgba(47,111,237,0.2)",
     opacity: 0.5,
   },
-  addBtnText: { color: "#0B1020", fontWeight: "800", fontSize: 15 },
+  addBtnText: { color: primaryText, fontWeight: "800", fontSize: 15 },
 
   divider: { marginTop: 32, marginBottom: 12, paddingLeft: 4 },
   dividerText: {
-    color: COLORS.textDim,
+    color: colors.textDim,
     fontSize: 11,
     fontWeight: "800",
     letterSpacing: 1.5,
   },
 
   row: {
-    backgroundColor: COLORS.glassFill,
+    backgroundColor: rowFill,
     borderRadius: 20,
     padding: 14,
     marginBottom: 10,
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: COLORS.glassBorder,
+    borderColor: rowBorder,
   },
   rowLeft: { flex: 1, flexDirection: "row", alignItems: "center", gap: 14 },
   rowIcon: {
     width: 36,
     height: 36,
     borderRadius: 12,
-    backgroundColor: "rgba(143,208,255,0.1)",
+    backgroundColor: mode === "dark" ? "rgba(143,208,255,0.1)" : "rgba(47,111,237,0.1)",
     alignItems: "center",
     justifyContent: "center",
   },
-  rowLabel: { flex: 1, color: COLORS.text, fontSize: 15, fontWeight: "700" },
+  rowLabel: { flex: 1, color: colors.text, fontSize: 15, fontWeight: "700" },
   deleteBtn: {
     width: 40,
     height: 40,
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,92,92,0.05)",
+    backgroundColor:
+      mode === "dark" ? "rgba(255,92,92,0.05)" : "rgba(228,90,90,0.08)",
   },
 
   empty: {
@@ -328,11 +341,12 @@ const styles = StyleSheet.create({
     gap: 12,
     padding: 40,
   },
-  emptyTitle: { color: COLORS.text, fontWeight: "800", fontSize: 18 },
   emptyText: {
-    color: COLORS.textDim,
+    color: colors.textDim,
     fontSize: 14,
     textAlign: "center",
     lineHeight: 20,
   },
-});
+  emptyTitle: { color: colors.text, fontWeight: "800", fontSize: 18 },
+  });
+};

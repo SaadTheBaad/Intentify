@@ -10,8 +10,11 @@ export type HistoryItem = {
   s3Key?: string;
 };
 
+export type ThemeMode = "light" | "dark";
+
 const HISTORY_KEY = "intentify_history_v1";
 const DEVICE_ID_KEY = "intentify_device_id_v1";
+const THEME_KEY = "intentify_theme_v1";
 
 export async function getOrCreateDeviceId(): Promise<string> {
   const existing = await AsyncStorage.getItem(DEVICE_ID_KEY);
@@ -35,4 +38,14 @@ export async function saveHistoryItem(item: HistoryItem) {
 
 export async function clearHistory() {
   await AsyncStorage.removeItem(HISTORY_KEY);
+}
+
+export async function getThemeMode(): Promise<ThemeMode | null> {
+  const raw = await AsyncStorage.getItem(THEME_KEY);
+  if (raw === "light" || raw === "dark") return raw;
+  return null;
+}
+
+export async function setThemeMode(mode: ThemeMode) {
+  await AsyncStorage.setItem(THEME_KEY, mode);
 }

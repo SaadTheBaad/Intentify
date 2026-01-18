@@ -30,6 +30,7 @@ import {
   saveHistoryItem,
 } from "../src/services/storageService";
 import { makeIntentId } from "../src/utils/intent";
+import { ThemeColors, useTheme } from "../src/theme/theme";
 
 // --- Types ---
 type Suggestion = {
@@ -51,18 +52,6 @@ type PendingRecording = {
 const LOW_SCORE_THRESHOLD = 0.35;
 const TOP_K = 3;
 
-const COLORS = {
-  night: "#0B0F1F",
-  deep: "#10162C",
-  accent: "#8FD0FF",
-  success: "#A6FFC9",
-  text: "#EAF1FF",
-  textDim: "rgba(234,241,255,0.6)",
-  glassBorder: "rgba(255,255,255,0.08)",
-  glassFill: "rgba(16, 22, 44, 0.4)", // More transparent
-  activeFill: "rgba(143, 208, 255, 0.1)",
-};
-
 function scoreLabel(score: number) {
   if (score >= 0.6) return "High Confidence";
   if (score >= LOW_SCORE_THRESHOLD) return "Medium";
@@ -71,6 +60,10 @@ function scoreLabel(score: number) {
 
 export default function ConfirmScreen() {
   const insets = useSafeAreaInsets();
+  const { colors, mode } = useTheme();
+  const styles = useMemo(() => makeStyles(colors, mode), [colors, mode]);
+  const primaryTextColor = mode === "dark" ? "#0B1020" : "#F8FAFF";
+  const selectedTextColor = mode === "dark" ? "#fff" : colors.text;
   const { uri } = useLocalSearchParams<{ uri?: string }>();
   const safeUri = useMemo(() => (typeof uri === "string" ? uri : null), [uri]);
 
@@ -314,7 +307,7 @@ export default function ConfirmScreen() {
 
   return (
     <LinearGradient
-      colors={[COLORS.night, COLORS.deep, COLORS.night]}
+      colors={colors.background}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={[styles.container, { paddingTop: insets.top }]}
@@ -333,11 +326,11 @@ export default function ConfirmScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={COLORS.text} />
+          <Ionicons name="chevron-back" size={24} color={colors.text} />
         </Pressable>
         <Text style={styles.headerTitle}>Review</Text>
         <View style={styles.secureBadge}>
-          <Ionicons name="lock-closed" size={12} color={COLORS.success} />
+          <Ionicons name="lock-closed" size={12} color={colors.success} />
           <Text style={styles.secureText}>Secure</Text>
         </View>
       </View>
@@ -349,7 +342,7 @@ export default function ConfirmScreen() {
         <View style={styles.glassPanel}>
           <View style={styles.playerRow}>
             <View style={styles.iconCircle}>
-              <Ionicons name="mic" size={18} color={COLORS.accent} />
+              <Ionicons name="mic" size={18} color={colors.accent} />
             </View>
             <View style={styles.playerInfo}>
               <Text style={styles.playerLabel}>New Recording</Text>
@@ -363,7 +356,7 @@ export default function ConfirmScreen() {
               <Ionicons
                 name={isPlaying ? "stop" : "play"}
                 size={18}
-                color={COLORS.night}
+                color={primaryTextColor}
               />
             </Pressable>
           </View>
@@ -374,7 +367,7 @@ export default function ConfirmScreen() {
           {isWorking ? (
             <View style={styles.workingState}>
               <Animated.View style={{ opacity: pulseAnim }}>
-                <Ionicons name="sparkles" size={24} color={COLORS.accent} />
+                <Ionicons name="sparkles" size={24} color={colors.accent} />
               </Animated.View>
               <Text style={styles.workingText}>
                 {status || "Processing..."}
@@ -416,7 +409,7 @@ export default function ConfirmScreen() {
                       <Text
                         style={[
                           styles.intentLabel,
-                          isSelected && { color: "#fff" },
+                          isSelected && { color: selectedTextColor },
                         ]}
                       >
                         {s.label}
@@ -429,7 +422,7 @@ export default function ConfirmScreen() {
                             end={{ x: 1, y: 0 }}
                             style={styles.aiBadge}
                           >
-                            <Ionicons name="sparkles" size={10} color="#fff" />
+                            <Ionicons name="sparkles" size={10} color={colors.text} />
                             <Text style={styles.aiBadgeText}>AI Generated</Text>
                           </LinearGradient>
                         )}
@@ -485,7 +478,7 @@ export default function ConfirmScreen() {
             style={styles.confirmGradient}
           >
             {isWorking ? (
-              <Text style={[styles.confirmText, { color: COLORS.textDim }]}>
+              <Text style={[styles.confirmText, { color: colors.textDim }]}>
                 Saving...
               </Text>
             ) : (
@@ -493,12 +486,12 @@ export default function ConfirmScreen() {
                 <Ionicons
                   name="checkmark"
                   size={20}
-                  color={canConfirm ? COLORS.night : COLORS.textDim}
+                  color={canConfirm ? primaryTextColor : colors.textDim}
                 />
                 <Text
                   style={[
                     styles.confirmText,
-                    !canConfirm && { color: COLORS.textDim },
+                    !canConfirm && { color: colors.textDim },
                   ]}
                 >
                   Confirm Intent
@@ -512,7 +505,36 @@ export default function ConfirmScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors, mode: "light" | "dark") => {
+  const meshA =
+    mode === "dark" ? "rgba(143,208,255,0.18)" : "rgba(47,111,237,0.16)";
+  const meshB =
+    mode === "dark" ? "rgba(255,107,107,0.12)" : "rgba(228,90,90,0.12)";
+  const meshC =
+    mode === "dark" ? "rgba(128,152,255,0.12)" : "rgba(120,140,200,0.14)";
+  const cardBg = colors.surface;
+  const glassFill =
+    mode === "dark" ? "rgba(16, 22, 44, 0.4)" : "rgba(255,255,255,0.8)";
+  const activeFill =
+    mode === "dark" ? "rgba(143, 208, 255, 0.1)" : "rgba(47,111,237,0.12)";
+  const radioFill =
+    mode === "dark" ? "rgba(143,208,255,0.9)" : "rgba(47,111,237,0.9)";
+  const emptyFill =
+    mode === "dark" ? "rgba(255,255,255,0.04)" : "rgba(11,16,32,0.04)";
+  const iconFill =
+    mode === "dark" ? "rgba(255,255,255,0.06)" : "rgba(11,16,32,0.06)";
+  const actionFill =
+    mode === "dark" ? "rgba(255,255,255,0.05)" : "rgba(11,16,32,0.04)";
+  const accentTint =
+    mode === "dark" ? "rgba(143,208,255,0.12)" : "rgba(47,111,237,0.12)";
+  const accentBorder =
+    mode === "dark" ? "rgba(143,208,255,0.28)" : "rgba(47,111,237,0.24)";
+  const aiBg =
+    mode === "dark" ? "rgba(183,155,255,0.12)" : "rgba(160,130,255,0.12)";
+  const aiBorder =
+    mode === "dark" ? "rgba(183,155,255,0.28)" : "rgba(160,130,255,0.26)";
+
+  return StyleSheet.create({
   container: { flex: 1 },
 
   // Atmosphere
@@ -524,7 +546,7 @@ const styles = StyleSheet.create({
     width: 300,
     height: 300,
     borderRadius: 150,
-    backgroundColor: "rgba(143,208,255,0.15)",
+    backgroundColor: meshA,
   },
   meshB: {
     position: "absolute",
@@ -533,7 +555,7 @@ const styles = StyleSheet.create({
     width: 350,
     height: 350,
     borderRadius: 175,
-    backgroundColor: "rgba(128,152,255,0.08)",
+    backgroundColor: meshB,
   },
 
   // Header
@@ -549,34 +571,36 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: actionFill,
     alignItems: "center",
     justifyContent: "center",
   },
   headerTitle: {
     fontSize: 16,
     fontWeight: "700",
-    color: COLORS.text,
+    color: colors.text,
     letterSpacing: 0.5,
   },
   secureBadge: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: "rgba(166,255,201,0.1)",
+    backgroundColor:
+      mode === "dark" ? "rgba(166,255,201,0.1)" : "rgba(20,128,74,0.1)",
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(166,255,201,0.2)",
+    borderColor:
+      mode === "dark" ? "rgba(166,255,201,0.2)" : "rgba(20,128,74,0.2)",
   },
-  secureText: { fontSize: 10, fontWeight: "700", color: COLORS.success },
+  secureText: { fontSize: 10, fontWeight: "700", color: colors.success },
 
   // Player
   glassPanel: {
-    backgroundColor: COLORS.glassFill,
+    backgroundColor: glassFill,
     borderWidth: 1,
-    borderColor: COLORS.glassBorder,
+    borderColor: colors.softLine,
     borderRadius: 24,
     padding: 16,
     marginBottom: 24,
@@ -590,18 +614,18 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "rgba(143,208,255,0.1)",
+    backgroundColor: accentTint,
     alignItems: "center",
     justifyContent: "center",
   },
   playerInfo: { flex: 1 },
-  playerLabel: { color: COLORS.text, fontSize: 15, fontWeight: "700" },
-  playerSub: { color: COLORS.textDim, fontSize: 12 },
+  playerLabel: { color: colors.text, fontSize: 15, fontWeight: "700" },
+  playerSub: { color: colors.textDim, fontSize: 12 },
   playBtn: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: COLORS.text,
+    backgroundColor: colors.accent,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -614,32 +638,32 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
   },
-  workingText: { color: COLORS.accent, fontSize: 14, fontWeight: "600" },
+  workingText: { color: colors.accent, fontSize: 14, fontWeight: "600" },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
   sectionTitle: {
-    color: COLORS.textDim,
+    color: colors.textDim,
     fontSize: 13,
     textTransform: "uppercase",
     letterSpacing: 1,
     fontWeight: "700",
   },
-  retryText: { color: COLORS.accent, fontSize: 13 },
+  retryText: { color: colors.accent, fontSize: 13 },
 
   listContainer: { gap: 10 },
   suggestionCard: {
-    backgroundColor: "rgba(255,255,255,0.03)",
+    backgroundColor: actionFill,
     borderRadius: 18,
     padding: 16,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.05)",
+    borderColor: colors.softLine,
   },
   suggestionSelected: {
-    backgroundColor: COLORS.activeFill,
-    borderColor: "rgba(143,208,255,0.4)",
+    backgroundColor: activeFill,
+    borderColor: accentBorder,
   },
   suggestionRow: { flexDirection: "row", gap: 12, alignItems: "center" },
   radio: {
@@ -647,25 +671,26 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 11,
     borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.3)",
+    borderColor:
+      mode === "dark" ? "rgba(255,255,255,0.3)" : "rgba(11,16,32,0.3)",
     alignItems: "center",
     justifyContent: "center",
   },
-  radioActive: { borderColor: COLORS.accent },
+  radioActive: { borderColor: colors.accent },
   radioDot: {
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: COLORS.accent,
+    backgroundColor: colors.accent,
   },
   intentLabel: {
     fontSize: 16,
     fontWeight: "700",
-    color: "rgba(255,255,255,0.9)",
+    color: colors.text,
     marginBottom: 4,
   },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  confidenceText: { fontSize: 11, color: "rgba(255,255,255,0.5)" },
+  confidenceText: { fontSize: 11, color: colors.textDim },
   aiBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -673,18 +698,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
+    backgroundColor: aiBg,
   },
-  aiBadgeText: { fontSize: 10, fontWeight: "800", color: "#fff" },
+  aiBadgeText: { fontSize: 10, fontWeight: "800", color: colors.text },
 
   emptyState: { alignItems: "center", padding: 20, gap: 10 },
-  emptyText: { color: COLORS.textDim },
+  emptyText: { color: colors.textDim },
   secondaryAction: {
     paddingVertical: 8,
     paddingHorizontal: 16,
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: actionFill,
     borderRadius: 8,
   },
-  secondaryActionText: { color: COLORS.text, fontSize: 12, fontWeight: "600" },
+  secondaryActionText: { color: colors.text, fontSize: 12, fontWeight: "600" },
 
   // Bottom Bar
   bottomBar: {
@@ -715,6 +741,7 @@ const styles = StyleSheet.create({
   confirmText: {
     fontSize: 16,
     fontWeight: "700",
-    color: COLORS.night,
+    color: "#0B1020",
   },
-});
+  });
+};

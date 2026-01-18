@@ -13,23 +13,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { startRecording, stopRecording } from "../../src/services/audioService";
-
-const COLORS = {
-  ink: "#0B0E16",
-  night: "#0B0F1F",
-  deep: "#10162C",
-  haze: "#141A33",
-  mist: "rgba(255,255,255,0.08)",
-  line: "rgba(255,255,255,0.12)",
-  softLine: "rgba(255,255,255,0.08)",
-  accent: "#8FD0FF",
-  live: "#FF6B6B",
-  text: "#EAF1FF",
-  textDim: "rgba(234,241,255,0.68)",
-  textSoft: "rgba(234,241,255,0.52)",
-  chipIdle: "rgba(143,208,255,0.10)",
-  chipLive: "rgba(255,107,107,0.16)",
-};
+import { ThemeColors, useTheme } from "../../src/theme/theme";
 
 const TYPE = {
   hero: 24,
@@ -78,6 +62,8 @@ const BAR_COUNT = 36;
 
 export default function RecordScreen() {
   const insets = useSafeAreaInsets();
+  const { colors, mode, toggleMode } = useTheme();
+  const styles = useMemo(() => makeStyles(colors, mode), [colors, mode]);
   const [isRecording, setIsRecording] = useState(false);
   const [lastUri, setLastUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -276,7 +262,7 @@ export default function RecordScreen() {
 
   return (
     <LinearGradient
-      colors={[COLORS.night, COLORS.deep, COLORS.night]}
+      colors={colors.background}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={[
@@ -311,28 +297,43 @@ export default function RecordScreen() {
       >
         <View style={styles.headerLeft}>
           <View style={styles.appIcon}>
-            <Ionicons name="sparkles" size={18} color={COLORS.accent} />
+            <Ionicons name="sparkles" size={18} color={colors.accent} />
           </View>
           <View>
             <Text style={styles.title}>Intentify</Text>
           </View>
         </View>
 
-        <Animated.View
-          style={[
-            styles.chip,
-            isRecording ? styles.chipLive : styles.chipIdle,
-            { transform: [{ scale: statusScale }] },
-          ]}
-        >
-          <Animated.View style={[styles.chipGlow, { opacity: statusAnim }]} />
-          <View
-            style={[styles.dot, isRecording ? styles.dotLive : styles.dotIdle]}
-          />
-          <Text style={styles.chipText}>
-            {isRecording ? "Listening" : "Ready"}
-          </Text>
-        </Animated.View>
+        <View style={styles.headerRight}>
+          <Animated.View
+            style={[
+              styles.chip,
+              isRecording ? styles.chipLive : styles.chipIdle,
+              { transform: [{ scale: statusScale }] },
+            ]}
+          >
+            <Animated.View style={[styles.chipGlow, { opacity: statusAnim }]} />
+            <View
+              style={[styles.dot, isRecording ? styles.dotLive : styles.dotIdle]}
+            />
+            <Text style={styles.chipText}>
+              {isRecording ? "Listening" : "Ready"}
+            </Text>
+          </Animated.View>
+          <Pressable
+            onPress={toggleMode}
+            style={({ pressed }) => [
+              styles.themeToggle,
+              pressed && { opacity: 0.85 },
+            ]}
+          >
+            <Ionicons
+              name={mode === "dark" ? "sunny" : "moon"}
+              size={16}
+              color={colors.text}
+            />
+          </Pressable>
+        </View>
       </Animated.View>
 
       {/* Main Stage */}
@@ -378,7 +379,7 @@ export default function RecordScreen() {
               <Ionicons
                 name={isRecording ? "stop" : "mic"}
                 size={28}
-                color={isRecording ? "#FFE9E9" : COLORS.text}
+                color={isRecording ? "#FFE9E9" : colors.text}
               />
               <Text style={styles.recordButtonText}>
                 {isRecording ? "Stop" : "Record"}
@@ -432,7 +433,53 @@ export default function RecordScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors, mode: "light" | "dark") => {
+  const chipIdleBg =
+    mode === "dark" ? "rgba(143,208,255,0.10)" : "rgba(47,111,237,0.12)";
+  const chipIdleBorder =
+    mode === "dark" ? "rgba(143,208,255,0.22)" : "rgba(47,111,237,0.24)";
+  const chipLiveBg =
+    mode === "dark" ? "rgba(255,107,107,0.16)" : "rgba(228,90,90,0.16)";
+  const chipLiveBorder =
+    mode === "dark" ? "rgba(255,107,107,0.32)" : "rgba(228,90,90,0.28)";
+  const iconBg =
+    mode === "dark" ? "rgba(143,208,255,0.12)" : "rgba(47,111,237,0.12)";
+  const iconBorder =
+    mode === "dark" ? "rgba(143,208,255,0.24)" : "rgba(47,111,237,0.24)";
+  const meshA =
+    mode === "dark" ? "rgba(143,208,255,0.18)" : "rgba(47,111,237,0.16)";
+  const meshB =
+    mode === "dark" ? "rgba(255,107,107,0.12)" : "rgba(228,90,90,0.12)";
+  const meshC =
+    mode === "dark" ? "rgba(128,152,255,0.12)" : "rgba(120,140,200,0.14)";
+  const ringBorder =
+    mode === "dark" ? "rgba(255, 107, 107, 0.7)" : "rgba(228,90,90,0.65)";
+  const orbitBorder =
+    mode === "dark" ? "rgba(143,208,255,0.25)" : "rgba(47,111,237,0.2)";
+  const orbitInner =
+    mode === "dark" ? "rgba(255,255,255,0.12)" : "rgba(11,16,32,0.12)";
+  const recordIdleBg =
+    mode === "dark" ? "rgba(143,208,255,0.14)" : "rgba(47,111,237,0.14)";
+  const recordIdleBorder =
+    mode === "dark" ? "rgba(143,208,255,0.35)" : "rgba(47,111,237,0.3)";
+  const recordLiveBg =
+    mode === "dark" ? "rgba(255,107,107,0.22)" : "rgba(228,90,90,0.2)";
+  const recordLiveBorder =
+    mode === "dark" ? "rgba(255,107,107,0.48)" : "rgba(228,90,90,0.42)";
+  const visualizerBg =
+    mode === "dark" ? "rgba(255,255,255,0.04)" : "rgba(11,16,32,0.04)";
+  const visualizerBar =
+    mode === "dark" ? "rgba(234,241,255,0.85)" : "rgba(11,16,32,0.7)";
+  const infoBg =
+    mode === "dark" ? "rgba(143,208,255,0.06)" : "rgba(47,111,237,0.06)";
+  const infoBorder =
+    mode === "dark" ? "rgba(143,208,255,0.16)" : "rgba(47,111,237,0.2)";
+  const errorBg =
+    mode === "dark" ? "rgba(255,107,107,0.14)" : "rgba(228,90,90,0.12)";
+  const errorBorder =
+    mode === "dark" ? "rgba(255,107,107,0.32)" : "rgba(228,90,90,0.26)";
+
+  return StyleSheet.create({
   container: {
     flex: 1,
     paddingHorizontal: SPACING.l,
@@ -448,7 +495,7 @@ const styles = StyleSheet.create({
     width: 260,
     height: 260,
     borderRadius: 200,
-    backgroundColor: "rgba(143,208,255,0.18)",
+    backgroundColor: meshA,
   },
   meshB: {
     position: "absolute",
@@ -457,7 +504,7 @@ const styles = StyleSheet.create({
     width: 280,
     height: 280,
     borderRadius: 220,
-    backgroundColor: "rgba(255,107,107,0.12)",
+    backgroundColor: meshB,
   },
   meshC: {
     position: "absolute",
@@ -466,7 +513,7 @@ const styles = StyleSheet.create({
     width: 220,
     height: 220,
     borderRadius: 180,
-    backgroundColor: "rgba(128,152,255,0.12)",
+    backgroundColor: meshC,
   },
   vignette: {
     ...StyleSheet.absoluteFillObject,
@@ -487,17 +534,32 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: RADII.m,
-    backgroundColor: "rgba(143,208,255,0.12)",
+    backgroundColor: iconBg,
     borderWidth: 1,
-    borderColor: "rgba(143,208,255,0.24)",
+    borderColor: iconBorder,
     alignItems: "center",
     justifyContent: "center",
   },
   title: {
-    color: COLORS.text,
+    color: colors.text,
     fontSize: TYPE.hero,
     fontWeight: "800",
     letterSpacing: 0.2,
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.s,
+  },
+  themeToggle: {
+    width: 36,
+    height: 36,
+    borderRadius: RADII.m,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: colors.softLine,
   },
 
   chip: {
@@ -511,12 +573,12 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   chipIdle: {
-    backgroundColor: COLORS.chipIdle,
-    borderColor: "rgba(143,208,255,0.22)",
+    backgroundColor: chipIdleBg,
+    borderColor: chipIdleBorder,
   },
   chipLive: {
-    backgroundColor: COLORS.chipLive,
-    borderColor: "rgba(255,107,107,0.32)",
+    backgroundColor: chipLiveBg,
+    borderColor: chipLiveBorder,
   },
   chipGlow: {
     position: "absolute",
@@ -528,16 +590,16 @@ const styles = StyleSheet.create({
   },
   dot: { width: 8, height: 8, borderRadius: RADII.round },
   dotIdle: { backgroundColor: "#7D8AA8" },
-  dotLive: { backgroundColor: COLORS.live },
-  chipText: { color: COLORS.text, fontSize: TYPE.small, fontWeight: "700" },
+  dotLive: { backgroundColor: colors.live },
+  chipText: { color: colors.text, fontSize: TYPE.small, fontWeight: "700" },
 
   stage: {
     marginTop: SPACING.l,
     borderRadius: RADII.xl,
     padding: SPACING.l,
-    backgroundColor: "rgba(16,22,44,0.8)",
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: COLORS.line,
+    borderColor: colors.line,
     shadowColor: "#000",
     shadowOpacity: 0.35,
     shadowRadius: 22,
@@ -545,18 +607,18 @@ const styles = StyleSheet.create({
   },
   stageHeader: {
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.softLine,
+    borderBottomColor: colors.softLine,
     paddingBottom: SPACING.m,
   },
   cardTitle: {
-    color: COLORS.text,
+    color: colors.text,
     fontSize: TYPE.title,
     fontWeight: "800",
     letterSpacing: 0.2,
   },
   cardHint: {
     marginTop: SPACING.xs,
-    color: COLORS.textDim,
+    color: colors.textDim,
     fontSize: TYPE.body,
     lineHeight: 20,
   },
@@ -573,7 +635,7 @@ const styles = StyleSheet.create({
     height: 180,
     borderRadius: RADII.round,
     borderWidth: 1,
-    borderColor: "rgba(143,208,255,0.25)",
+    borderColor: orbitBorder,
     borderStyle: "dashed",
   },
   orbitInner: {
@@ -582,7 +644,7 @@ const styles = StyleSheet.create({
     height: 150,
     borderRadius: RADII.round,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
+    borderColor: orbitInner,
   },
   pulseRing: {
     position: "absolute",
@@ -590,7 +652,7 @@ const styles = StyleSheet.create({
     height: 150,
     borderRadius: RADII.round,
     borderWidth: 2,
-    borderColor: "rgba(255, 107, 107, 0.7)",
+    borderColor: ringBorder,
   },
 
   recordButton: {
@@ -603,15 +665,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   recordButtonIdle: {
-    backgroundColor: "rgba(143,208,255,0.14)",
-    borderColor: "rgba(143,208,255,0.35)",
+    backgroundColor: recordIdleBg,
+    borderColor: recordIdleBorder,
   },
   recordButtonLive: {
-    backgroundColor: "rgba(255,107,107,0.22)",
-    borderColor: "rgba(255,107,107,0.48)",
+    backgroundColor: recordLiveBg,
+    borderColor: recordLiveBorder,
   },
   recordButtonText: {
-    color: COLORS.text,
+    color: colors.text,
     fontSize: TYPE.small,
     fontWeight: "800",
     letterSpacing: 0.5,
@@ -629,19 +691,19 @@ const styles = StyleSheet.create({
     borderRadius: RADII.round,
   },
   recDotLive: {
-    backgroundColor: COLORS.live,
+    backgroundColor: colors.live,
   },
   recDotIdle: {
-    backgroundColor: "rgba(234,241,255,0.35)",
+    backgroundColor: mode === "dark" ? "rgba(234,241,255,0.35)" : "rgba(11,16,32,0.3)",
   },
   timerText: {
-    color: COLORS.text,
+    color: colors.text,
     fontSize: TYPE.body,
     fontWeight: "800",
     letterSpacing: 1,
   },
   timerLabel: {
-    color: COLORS.textSoft,
+    color: colors.textSoft,
     fontSize: TYPE.small,
     fontWeight: "700",
     letterSpacing: 1,
@@ -654,14 +716,14 @@ const styles = StyleSheet.create({
     height: 58,
     paddingHorizontal: SPACING.xs,
     borderRadius: RADII.m,
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: visualizerBg,
     borderWidth: 1,
-    borderColor: COLORS.softLine,
+    borderColor: colors.softLine,
   },
   visualizerBar: {
     width: 3,
     borderRadius: RADII.round,
-    backgroundColor: "rgba(234,241,255,0.85)",
+    backgroundColor: visualizerBar,
   },
 
   infoBox: {
@@ -671,11 +733,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: SPACING.m,
     borderRadius: RADII.m,
-    backgroundColor: "rgba(143,208,255,0.06)",
+    backgroundColor: infoBg,
     borderWidth: 1,
-    borderColor: "rgba(143,208,255,0.16)",
+    borderColor: infoBorder,
   },
-  infoText: { flex: 1, color: COLORS.textDim, fontSize: TYPE.small },
+  infoText: { flex: 1, color: colors.textDim, fontSize: TYPE.small },
 
   errorBox: {
     marginTop: SPACING.s,
@@ -684,9 +746,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: SPACING.m,
     borderRadius: RADII.m,
-    backgroundColor: "rgba(255,107,107,0.14)",
+    backgroundColor: errorBg,
     borderWidth: 1,
-    borderColor: "rgba(255,107,107,0.32)",
+    borderColor: errorBorder,
   },
   errorText: {
     flex: 1,
@@ -698,7 +760,8 @@ const styles = StyleSheet.create({
   footer: {
     marginTop: SPACING.l,
     textAlign: "center",
-    color: COLORS.textSoft,
+    color: colors.textSoft,
     fontSize: TYPE.small,
   },
-});
+  });
+};

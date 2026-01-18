@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -26,17 +26,7 @@ import {
 } from "../../src/services/apiService";
 
 import { playRecording, stopPlayback } from "../../src/services/audioService";
-
-// Shared Theme Constants
-const COLORS = {
-  bg: ["#0B1020", "#0E1731", "#0A0F1F"],
-  text: "#EAF0FF",
-  textDim: "rgba(234,240,255,0.5)",
-  accent: "#8FD0FF",
-  danger: "#FFD1D1",
-  glassFill: "rgba(255,255,255,0.04)",
-  glassBorder: "rgba(255,255,255,0.08)",
-};
+import { ThemeColors, useTheme } from "../../src/theme/theme";
 
 type UiItem = {
   id: string;
@@ -85,6 +75,9 @@ function formatWhen(iso: string) {
 
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
+  const { colors, mode } = useTheme();
+  const styles = useMemo(() => makeStyles(colors, mode), [colors, mode]);
+  const primaryTextColor = mode === "dark" ? "#0B1020" : "#F8FAFF";
   const [items, setItems] = useState<UiItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState<string>("");
@@ -171,7 +164,7 @@ export default function HistoryScreen() {
   const isBusy = playingKey !== null || speakingKey !== null;
 
   return (
-    <LinearGradient colors={COLORS.bg as any} style={styles.container}>
+    <LinearGradient colors={colors.background as any} style={styles.container}>
       {/* Decorative Atmosphere Blobs */}
       <View style={styles.atmosphere}>
         <View style={styles.meshA} />
@@ -212,7 +205,7 @@ export default function HistoryScreen() {
                       <Ionicons
                         name="cloud-done"
                         size={12}
-                        color={COLORS.accent}
+                        color={colors.accent}
                       />
                     </View>
                   )}
@@ -234,7 +227,7 @@ export default function HistoryScreen() {
                   <Ionicons
                     name="volume-medium-outline"
                     size={18}
-                    color={COLORS.text}
+                    color={colors.text}
                   />
                   <Text style={styles.btnText}>
                     {isSpeaking ? "..." : "Speak"}
@@ -252,9 +245,9 @@ export default function HistoryScreen() {
                   <Ionicons
                     name={isPlaying ? "pause" : "play"}
                     size={16}
-                    color="#0B1020"
+                    color={primaryTextColor}
                   />
-                  <Text style={[styles.btnText, { color: "#0B1020" }]}>
+                  <Text style={[styles.btnText, { color: primaryTextColor }]}>
                     {isPlaying ? "Stop" : "Original"}
                   </Text>
                 </Pressable>
@@ -267,7 +260,21 @@ export default function HistoryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors, mode: "light" | "dark") => {
+  const meshA =
+    mode === "dark" ? "rgba(143,208,255,0.05)" : "rgba(47,111,237,0.08)";
+  const meshB =
+    mode === "dark" ? "rgba(128,152,255,0.03)" : "rgba(120,140,200,0.06)";
+  const cardFill =
+    mode === "dark" ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.7)";
+  const cardBorder =
+    mode === "dark" ? "rgba(255,255,255,0.08)" : "rgba(11,16,32,0.08)";
+  const buttonFill =
+    mode === "dark" ? "rgba(255,255,255,0.06)" : "rgba(11,16,32,0.04)";
+  const buttonBorder =
+    mode === "dark" ? "rgba(255,255,255,0.1)" : "rgba(11,16,32,0.12)";
+
+  return StyleSheet.create({
   container: { flex: 1 },
   atmosphere: { ...StyleSheet.absoluteFillObject, overflow: "hidden" },
   meshA: {
@@ -277,7 +284,7 @@ const styles = StyleSheet.create({
     width: 250,
     height: 250,
     borderRadius: 125,
-    backgroundColor: "rgba(143,208,255,0.05)",
+    backgroundColor: meshA,
   },
   meshB: {
     position: "absolute",
@@ -286,7 +293,7 @@ const styles = StyleSheet.create({
     width: 300,
     height: 300,
     borderRadius: 150,
-    backgroundColor: "rgba(128,152,255,0.03)",
+    backgroundColor: meshB,
   },
   listContent: { paddingHorizontal: 20 },
   header: {
@@ -298,17 +305,17 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: "900",
-    color: COLORS.text,
+    color: colors.text,
     letterSpacing: -0.5,
   },
-  subtitle: { fontSize: 14, color: COLORS.textDim, marginTop: 2 },
+  subtitle: { fontSize: 14, color: colors.textDim, marginTop: 2 },
   card: {
-    backgroundColor: COLORS.glassFill,
+    backgroundColor: cardFill,
     borderRadius: 24,
     padding: 20,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: COLORS.glassBorder,
+    borderColor: cardBorder,
   },
   cardInfo: { marginBottom: 16 },
   intentRow: {
@@ -320,18 +327,19 @@ const styles = StyleSheet.create({
   intentText: {
     fontSize: 18,
     fontWeight: "700",
-    color: COLORS.text,
+    color: colors.text,
     flex: 1,
     lineHeight: 24,
   },
   cloudBadge: {
     padding: 4,
     borderRadius: 8,
-    backgroundColor: "rgba(143,208,255,0.1)",
+    backgroundColor:
+      mode === "dark" ? "rgba(143,208,255,0.1)" : "rgba(47,111,237,0.12)",
   },
   dateText: {
     fontSize: 12,
-    color: COLORS.textDim,
+    color: colors.textDim,
     marginTop: 6,
     fontWeight: "500",
   },
@@ -340,7 +348,7 @@ const styles = StyleSheet.create({
     flex: 1.2,
     height: 46,
     borderRadius: 14,
-    backgroundColor: COLORS.accent,
+    backgroundColor: colors.accent,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -350,13 +358,14 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 46,
     borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: buttonFill,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+    borderColor: buttonBorder,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
   },
-  btnText: { fontSize: 14, fontWeight: "700", color: COLORS.text },
-});
+  btnText: { fontSize: 14, fontWeight: "700", color: colors.text },
+  });
+};
