@@ -25,6 +25,23 @@ Parameters:
     Type: String
     Default: text-embedding-3-small
 
+  OpenAIGptModel:
+    Type: String
+    Default: gpt-4o-mini
+
+  SuggestIntentSystemPrompt:
+    Type: String
+    Default: "You are a helpful assistant that generates clear, concise intent phrases from user transcripts. Respond only with the intent phrase."
+
+  SuggestIntentUserPromptTemplate:
+    Type: String
+    Default: |
+      Given the following user speech transcript, suggest a clear and concise intent phrase that captures what the user wants to communicate or accomplish. The intent should be in first person and be suitable for quick selection in the future.
+
+      Transcript: "{transcript}"
+
+      Provide only the intent phrase, nothing else. Keep it under 100 characters. Make it natural and conversational.
+
 Resources:
   Api:
     Type: AWS::Serverless::Api
@@ -236,6 +253,28 @@ Resources:
           Properties:
             RestApiId: !Ref Api
             Path: /match
+            Method: POST
+
+  # --------------------
+  # AI Suggest Intent (OpenAI GPT)
+  # --------------------
+  SuggestIntentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: suggestIntent/
+      Handler: handler.handler
+      Environment:
+        Variables:
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_GPT_MODEL: !Ref OpenAIGptModel
+          SYSTEM_PROMPT: !Ref SuggestIntentSystemPrompt
+          USER_PROMPT_TEMPLATE: !Ref SuggestIntentUserPromptTemplate
+      Events:
+        SuggestIntentRoute:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /suggest-intent
             Method: POST
 
   # --------------------
