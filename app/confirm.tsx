@@ -4,6 +4,8 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Animated,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,6 +14,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+// --- Services (Kept exactly as is) ---
 import {
   createIntent,
   createRecording,
@@ -22,9 +25,13 @@ import {
 } from "../src/services/apiService";
 import { playRecording, stopPlayback } from "../src/services/audioService";
 import { uploadToPresignedUrl } from "../src/services/s3UploadService";
-import { getOrCreateDeviceId, saveHistoryItem } from "../src/services/storageService";
+import {
+  getOrCreateDeviceId,
+  saveHistoryItem,
+} from "../src/services/storageService";
 import { makeIntentId } from "../src/utils/intent";
 
+// --- Types ---
 type Suggestion = {
   intentId: string;
   label: string;
@@ -40,54 +47,96 @@ type PendingRecording = {
   transcript: string;
 };
 
+// --- Constants ---
 const LOW_SCORE_THRESHOLD = 0.35;
 const TOP_K = 3;
 
+const COLORS = {
+  night: "#0B0F1F",
+  deep: "#10162C",
+  accent: "#8FD0FF",
+  success: "#A6FFC9",
+  text: "#EAF1FF",
+  textDim: "rgba(234,241,255,0.6)",
+  glassBorder: "rgba(255,255,255,0.08)",
+  glassFill: "rgba(16, 22, 44, 0.4)", // More transparent
+  activeFill: "rgba(143, 208, 255, 0.1)",
+};
+
 function scoreLabel(score: number) {
-  if (score >= 0.6) return "High";
+  if (score >= 0.6) return "High Confidence";
   if (score >= LOW_SCORE_THRESHOLD) return "Medium";
-  return "Low";
+  return "Low Confidence";
 }
 
-/**
- * confirm.tsx
- *
- * This screen runs the full "Intentify pipeline" when it receives an audio `uri`:
- * 1) presign PUT
- * 2) upload audio to S3
- * 3) transcribe from S3
- * 4) match transcript against saved intents (embeddings + cosine)
- * 5) if no match / low confidence -> request AI "suggest intent"
- * 6) user confirms intent; optionally creates new intent; saves recording + local history
- */
 export default function ConfirmScreen() {
   const insets = useSafeAreaInsets();
-
   const { uri } = useLocalSearchParams<{ uri?: string }>();
   const safeUri = useMemo(() => (typeof uri === "string" ? uri : null), [uri]);
 
-  // Prevent re-running the pipeline if the screen re-renders with the same URI.
+  // Logic Refs
   const lastAutoUri = useRef<string | null>(null);
-
-  // Guard against state updates from stale async runs (e.g., user navigates away).
   const runIdRef = useRef(0);
 
+  // Animation Refs
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  // State
   const [status, setStatus] = useState<string | null>(null);
   const [isWorking, setIsWorking] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [hasRun, setHasRun] = useState(false);
-
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-
   const [pending, setPending] = useState<PendingRecording | null>(null);
+
+  // --- Animations ---
+  useEffect(() => {
+    if (isWorking || isPlaying) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 0.6,
+            duration: 800,
+            useNativeDriver: true,
+            easing: Easing.inOut(Easing.ease),
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 800,
+            useNativeDriver: true,
+            easing: Easing.inOut(Easing.ease),
+          }),
+        ]),
+      ).start();
+    } else {
+      pulseAnim.setValue(1);
+    }
+  }, [isWorking, isPlaying]);
+
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 600,
+      useNativeDriver: true,
+    }).start();
+  }, []);
+
+  // --- Handlers ---
 
   const onPlay = async () => {
     if (!safeUri) return;
+    setIsPlaying(true);
     await playRecording(safeUri);
+    // Simple timeout to reset play state since we don't have an event listener in this snippet
+    // In a real app, use the sound object's status update
+    setTimeout(() => setIsPlaying(false), 3000);
   };
 
   const onStop = async () => {
     await stopPlayback();
+    setIsPlaying(false);
   };
 
   function resetUiForRun() {
@@ -100,26 +149,13 @@ export default function ConfirmScreen() {
 
   const runPipeline = async () => {
     if (!safeUri) return;
-
     const myRunId = ++runIdRef.current;
-
     setIsWorking(true);
     resetUiForRun();
 
-    const setStatusSafe = (msg: string) => {
-      if (runIdRef.current === myRunId) setStatus(msg);
-    };
-    const setSuggestionsSafe = (next: Suggestion[]) => {
-      if (runIdRef.current === myRunId) setSuggestions(next);
-    };
-    const setSelectedSafe = (id: string | null) => {
-      if (runIdRef.current === myRunId) setSelectedId(id);
-    };
-    const setPendingSafe = (p: PendingRecording | null) => {
-      if (runIdRef.current === myRunId) setPending(p);
-    };
-    const setHasRunSafe = (v: boolean) => {
-      if (runIdRef.current === myRunId) setHasRun(v);
+    // Helper closures to ensure we only update if this is the active run
+    const ifActive = (fn: () => void) => {
+      if (runIdRef.current === myRunId) fn();
     };
 
     try {
@@ -127,67 +163,60 @@ export default function ConfirmScreen() {
       const recordingId = `${Date.now()}`;
       const createdAt = new Date().toISOString();
 
-      setStatusSafe("Getting upload URL…");
+      ifActive(() => setStatus("Uploading..."));
       const { uploadUrl, key } = await getPresignedUrl(deviceId);
-
-      setStatusSafe("Uploading audio…");
       await uploadToPresignedUrl(uploadUrl, safeUri);
 
-      setStatusSafe("Transcribing…");
+      ifActive(() => setStatus("Transcribing..."));
       const tRes = await transcribeFromS3(deviceId, key);
       const transcript = (tRes.transcript || "").trim();
+      if (!transcript) throw new Error("No transcript returned.");
 
-      if (!transcript) {
-        throw new Error("No transcript returned (try recording again).");
-      }
-
-      setStatusSafe("Finding best intent…");
+      ifActive(() => setStatus("Analyzing..."));
       const matchRes = await matchIntents(deviceId, transcript, TOP_K);
       const matched = (matchRes.suggestions || []).filter(
-        (s) => typeof s.score === "number" && !!s.label && !!s.intentId
+        (s) => typeof s.score === "number" && !!s.label && !!s.intentId,
       );
 
-      const needsAiSuggestion =
-        matched.length === 0 || matched.every((s) => s.score < LOW_SCORE_THRESHOLD);
+      const needsAi =
+        matched.length === 0 ||
+        matched.every((s) => s.score < LOW_SCORE_THRESHOLD);
 
-      if (needsAiSuggestion) {
-        setStatusSafe("Generating AI suggestion…");
+      if (needsAi) {
+        ifActive(() => setStatus("Generating AI suggestion..."));
         const aiRes = await suggestIntent(transcript);
-
         const label = (aiRes?.suggestion?.label || "").trim();
-        if (!label) {
-          throw new Error("AI returned an empty suggestion.");
-        }
+        if (!label) throw new Error("AI returned empty.");
 
         const aiIntentId = `ai-suggestion-${Date.now()}`;
-        const aiSuggestions: Suggestion[] = [
-          { intentId: aiIntentId, label, score: 0, isAi: true },
-        ];
-
-        setSuggestionsSafe(aiSuggestions);
-        setSelectedSafe(aiIntentId);
+        ifActive(() => {
+          setSuggestions([
+            { intentId: aiIntentId, label, score: 0, isAi: true },
+          ]);
+          setSelectedId(aiIntentId);
+        });
       } else {
-        setSuggestionsSafe(matched);
-        setSelectedSafe(matched[0]?.intentId ?? null);
+        ifActive(() => {
+          setSuggestions(matched);
+          setSelectedId(matched[0]?.intentId ?? null);
+        });
       }
 
-      setPendingSafe({
-        deviceId,
-        recordingId,
-        createdAt,
-        s3Key: key,
-        transcript,
+      ifActive(() => {
+        setPending({
+          deviceId,
+          recordingId,
+          createdAt,
+          s3Key: key,
+          transcript,
+        });
+        setHasRun(true);
+        setStatus(null);
       });
-
-      setHasRunSafe(true);
-      setStatusSafe(
-        needsAiSuggestion
-          ? "AI suggested an intent for you. Review and Confirm!"
-          : "Pick the best match, then Confirm!"
-      );
+    } catch (e: any) {
+      ifActive(() => setStatus("Error: " + e.message));
     } finally {
-      // Only end "working" state if this is still the latest run.
-      if (runIdRef.current === myRunId) setIsWorking(false);
+      ifActive(() => setIsWorking(false));
     }
   };
 
@@ -195,72 +224,51 @@ export default function ConfirmScreen() {
     try {
       await runPipeline();
     } catch (e: any) {
-      Alert.alert("Failed", e?.message ?? "Unknown error");
-      // Keep UI in a known state after errors.
-      setStatus(null);
-      setPending(null);
-      setSuggestions([]);
-      setSelectedId(null);
-      setHasRun(true);
+      Alert.alert("Error", e.message);
       setIsWorking(false);
     }
   };
 
-  /**
-   * Confirmation rules:
-   * - If user picked AI suggestion: create new intent first (dedupe by normalized ID).
-   * - Save local history for UX.
-   * - Save recording metadata to DynamoDB.
-   */
   const onConfirm = async () => {
     if (!pending || !selectedId || !safeUri) return;
-
     const selected = suggestions.find((s) => s.intentId === selectedId);
     if (!selected) return;
 
     try {
       setIsWorking(true);
-      setStatus("Saving…");
+      setStatus("Saving...");
 
-      let finalIntentId = selected.intentId;
-      let finalIntentLabel = selected.label;
+      let finalId = selected.intentId;
+      let finalLabel = selected.label;
 
       if (selected.isAi) {
-        // Turn the AI label into a stable intentId, so future matches are consistent.
-        const newIntentId = makeIntentId(selected.label);
-
-        // Deduplicate: if the same label already exists as a real intent, reuse it.
-        // NOTE: This only dedupes against *current* suggestions list.
+        const newId = makeIntentId(selected.label);
         const existing = suggestions.find(
-          (s) => !s.isAi && makeIntentId(s.label) === newIntentId
+          (s) => !s.isAi && makeIntentId(s.label) === newId,
         );
-
         if (existing) {
-          finalIntentId = existing.intentId;
-          finalIntentLabel = existing.label;
+          finalId = existing.intentId;
+          finalLabel = existing.label;
         } else {
-          setStatus("Adding AI-suggested intent…");
-          await createIntent(pending.deviceId, newIntentId, selected.label);
-          finalIntentId = newIntentId;
+          await createIntent(pending.deviceId, newId, selected.label);
+          finalId = newId;
         }
       }
 
-      // Local UX history (fast + works offline)
       await saveHistoryItem({
         id: pending.recordingId,
         createdAt: pending.createdAt,
         audioUri: safeUri,
-        intentId: finalIntentId,
-        intentLabel: finalIntentLabel,
+        intentId: finalId,
+        intentLabel: finalLabel,
         s3Key: pending.s3Key,
       });
 
-      // Backend record (source of truth)
       await createRecording({
         deviceId: pending.deviceId,
         recordingId: pending.recordingId,
         s3Key: pending.s3Key,
-        confirmedIntent: finalIntentLabel,
+        confirmedIntent: finalLabel,
         createdAt: pending.createdAt,
         transcript: pending.transcript,
       });
@@ -268,7 +276,7 @@ export default function ConfirmScreen() {
       setStatus("Done!");
       router.replace("/(tabs)/history");
     } catch (e: any) {
-      Alert.alert("Confirm failed", e?.message ?? "Unknown error");
+      Alert.alert("Failed", e.message);
       setStatus(null);
     } finally {
       setIsWorking(false);
@@ -277,247 +285,227 @@ export default function ConfirmScreen() {
 
   const onAddFromTranscript = async () => {
     if (!pending) return;
-
     const label = pending.transcript.trim();
-    if (!label) {
-      Alert.alert("No transcript", "Record again to generate a transcript.");
-      return;
-    }
+    if (!label) return Alert.alert("Empty", "No transcript available.");
 
+    setIsWorking(true);
+    setStatus("Adding...");
     try {
-      setIsWorking(true);
-      setStatus("Adding intent…");
-
       const intentId = makeIntentId(label);
       await createIntent(pending.deviceId, intentId, label);
-
-      const next: Suggestion[] = [{ intentId, label, score: 1 }];
-      setSuggestions(next);
+      setSuggestions([{ intentId, label, score: 1 }]);
       setSelectedId(intentId);
-
-      setStatus("Intent added. Review and Confirm!");
-    } catch (e: any) {
-      Alert.alert("Add failed", e?.message ?? "Unknown error");
       setStatus(null);
+    } catch (e: any) {
+      Alert.alert("Error", e.message);
     } finally {
       setIsWorking(false);
     }
   };
 
-  const canGenerate = !!safeUri && !isWorking;
-  const canConfirm = !!pending && !!selectedId && !isWorking;
-
   useEffect(() => {
-    if (!safeUri) return;
-    if (lastAutoUri.current === safeUri) return;
-
-    lastAutoUri.current = safeUri;
-    onGenerateSuggestions();
+    if (safeUri && lastAutoUri.current !== safeUri) {
+      lastAutoUri.current = safeUri;
+      onGenerateSuggestions();
+    }
   }, [safeUri]);
+
+  const canConfirm = !!pending && !!selectedId && !isWorking;
 
   return (
     <LinearGradient
-      colors={["#0B1020", "#0E1731", "#0A0F1F"]}
+      colors={[COLORS.night, COLORS.deep, COLORS.night]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
-      style={[
-        styles.container,
-        {
-          paddingTop: insets.top + 14,
-          paddingBottom: Math.max(insets.bottom, 18) + 18,
-        },
-      ]}
+      style={[styles.container, { paddingTop: insets.top }]}
     >
-      <ScrollView contentContainerStyle={{ paddingBottom: 110 }} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.headerRow}>
-          <View style={styles.headerLeft}>
-            <View style={styles.appIcon}>
-              <Ionicons name="checkmark-done" size={18} color="#D7E3FF" />
-            </View>
-            <View>
-              <Text style={styles.title}>Confirm Intent</Text>
-              <Text style={styles.subtitle}>Review the audio, then choose the best match.</Text>
-            </View>
-          </View>
+      {/* Background Atmosphere */}
+      <View style={styles.atmosphere}>
+        <Animated.View
+          style={[
+            styles.meshA,
+            { opacity: fadeAnim, transform: [{ scale: fadeAnim }] },
+          ]}
+        />
+        <View style={styles.meshB} />
+      </View>
+
+      {/* Header */}
+      <View style={styles.header}>
+        <Pressable onPress={() => router.back()} style={styles.backBtn}>
+          <Ionicons name="chevron-back" size={24} color={COLORS.text} />
+        </Pressable>
+        <Text style={styles.headerTitle}>Review</Text>
+        <View style={styles.secureBadge}>
+          <Ionicons name="lock-closed" size={12} color={COLORS.success} />
+          <Text style={styles.secureText}>Secure</Text>
         </View>
+      </View>
 
-        {/* Audio controls */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Audio</Text>
-          <Text style={styles.cardHint}>Play the recording to verify it sounds right.</Text>
-
-          <View style={styles.actionsRow}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 140, paddingHorizontal: 20 }}
+      >
+        {/* Audio Player Card */}
+        <View style={styles.glassPanel}>
+          <View style={styles.playerRow}>
+            <View style={styles.iconCircle}>
+              <Ionicons name="mic" size={18} color={COLORS.accent} />
+            </View>
+            <View style={styles.playerInfo}>
+              <Text style={styles.playerLabel}>New Recording</Text>
+              <Text style={styles.playerSub}>Tap to play audio</Text>
+            </View>
             <Pressable
-              onPress={onPlay}
-              disabled={!safeUri || isWorking}
-              style={({ pressed }) => [
-                styles.actionBtn,
-                (!safeUri || isWorking) && styles.actionBtnDisabled,
-                pressed && !isWorking && safeUri && { opacity: 0.88 },
-              ]}
-            >
-              <Ionicons name="play" size={18} color="#D7E3FF" />
-              <Text style={styles.actionText}>Play</Text>
-            </Pressable>
-
-            <Pressable
-              onPress={onStop}
+              onPress={isPlaying ? onStop : onPlay}
+              style={styles.playBtn}
               disabled={isWorking}
-              style={({ pressed }) => [
-                styles.actionBtn,
-                isWorking && styles.actionBtnDisabled,
-                pressed && !isWorking && { opacity: 0.88 },
-              ]}
             >
-              <Ionicons name="square" size={18} color="#D7E3FF" />
-              <Text style={styles.actionText}>Stop</Text>
+              <Ionicons
+                name={isPlaying ? "stop" : "play"}
+                size={18}
+                color={COLORS.night}
+              />
             </Pressable>
           </View>
+        </View>
 
-          <Pressable
-            onPress={onGenerateSuggestions}
-            disabled={!canGenerate}
-            style={({ pressed }) => [
-              styles.primaryBtn,
-              !canGenerate && styles.primaryBtnDisabled,
-              pressed && canGenerate && { opacity: 0.92 },
-            ]}
-          >
-            <Ionicons
-              name={isWorking ? "sparkles" : "sparkles-outline"}
-              size={18}
-              color={canGenerate ? "#0B1020" : "rgba(11,16,32,0.55)"}
-            />
-            <Text style={[styles.primaryBtnText, !canGenerate && styles.primaryBtnTextDisabled]}>
-              {isWorking ? "Working…" : "Generate Suggestions"}
-            </Text>
-            <View style={{ width: 18 }} />
-          </Pressable>
-
-          {status ? (
-            <View style={styles.statusBox}>
-              <Ionicons name="information-circle" size={16} color="#BFD2FF" />
-              <Text style={styles.statusText}>{status}</Text>
+        {/* Dynamic Status / Action Area */}
+        <View style={styles.statusArea}>
+          {isWorking ? (
+            <View style={styles.workingState}>
+              <Animated.View style={{ opacity: pulseAnim }}>
+                <Ionicons name="sparkles" size={24} color={COLORS.accent} />
+              </Animated.View>
+              <Text style={styles.workingText}>
+                {status || "Processing..."}
+              </Text>
             </View>
-          ) : null}
+          ) : (
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Matched Intent</Text>
+              {hasRun && pending && (
+                <Pressable onPress={onGenerateSuggestions}>
+                  <Text style={styles.retryText}>Retry</Text>
+                </Pressable>
+              )}
+            </View>
+          )}
         </View>
 
-        {/* Suggestions */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Suggestions</Text>
-          <Text style={styles.sectionHint}>Tap one to select it.</Text>
-        </View>
-
-        {suggestions.length === 0 ? (
-          <View style={styles.empty}>
-            <Ionicons name="flash-outline" size={22} color="rgba(215,227,255,0.55)" />
-            <Text style={styles.emptyTitle}>
-              {hasRun ? "No matches found" : "Generating automatically…"}
-            </Text>
-            <Text style={styles.emptyText}>
-              {hasRun
-                ? "Add the transcript as a new intent, or manage intents manually."
-                : "If it doesn’t start, tap Generate Suggestions."}
-            </Text>
-
-            {hasRun ? (
-              <View style={{ width: "100%", gap: 10, marginTop: 10 }}>
-                <Pressable
-                  onPress={onAddFromTranscript}
-                  disabled={!pending || isWorking}
-                  style={({ pressed }) => [
-                    styles.secondaryBtn,
-                    (!pending || isWorking) && styles.secondaryBtnDisabled,
-                    pressed && pending && !isWorking && { opacity: 0.9 },
-                  ]}
-                >
-                  <Ionicons name="add-circle-outline" size={18} color="#D7E3FF" />
-                  <Text style={styles.secondaryBtnText}>Add transcript as intent</Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={() => router.push("/(tabs)/intents")}
-                  disabled={isWorking}
-                  style={({ pressed }) => [
-                    styles.secondaryBtn,
-                    isWorking && styles.secondaryBtnDisabled,
-                    pressed && !isWorking && { opacity: 0.9 },
-                  ]}
-                >
-                  <Ionicons name="list" size={18} color="#D7E3FF" />
-                  <Text style={styles.secondaryBtnText}>Go to intents</Text>
-                </Pressable>
-              </View>
-            ) : null}
-          </View>
-        ) : (
-          <View style={{ gap: 12 }}>
-            {suggestions.map((s) => {
-              const active = s.intentId === selectedId;
-              const strength = s.isAi ? "AI" : scoreLabel(s.score);
-
+        {/* Suggestions List */}
+        <View style={styles.listContainer}>
+          {suggestions.length > 0 ? (
+            suggestions.map((s) => {
+              const isSelected = s.intentId === selectedId;
               return (
                 <Pressable
                   key={s.intentId}
                   onPress={() => setSelectedId(s.intentId)}
-                  disabled={isWorking}
-                  style={({ pressed }) => [
-                    styles.suggCard,
-                    active && styles.suggCardActive,
-                    s.isAi && styles.suggCardAi,
-                    isWorking && { opacity: 0.6 },
-                    pressed && !isWorking && { opacity: 0.92 },
+                  style={[
+                    styles.suggestionCard,
+                    isSelected && styles.suggestionSelected,
                   ]}
                 >
-                  <View style={styles.suggTopRow}>
-                    <View style={styles.radio}>
-                      {active ? <View style={styles.radioDot} /> : <View style={styles.radioHollow} />}
+                  <View style={styles.suggestionRow}>
+                    <View
+                      style={[styles.radio, isSelected && styles.radioActive]}
+                    >
+                      {isSelected && <View style={styles.radioDot} />}
                     </View>
-
-                    <Text style={styles.suggLabel} numberOfLines={2}>
-                      {s.label}
-                    </Text>
-
-                    <View style={[styles.scorePill, s.isAi && styles.scorePillAi]}>
-                      {s.isAi ? (
-                        <>
-                          <Ionicons name="sparkles" size={11} color="#D7E3FF" />
-                          <Text style={styles.scorePillText}>AI Suggested</Text>
-                        </>
-                      ) : (
-                        <Text style={styles.scorePillText}>
-                          {strength} • {s.score.toFixed(3)}
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={[
+                          styles.intentLabel,
+                          isSelected && { color: "#fff" },
+                        ]}
+                      >
+                        {s.label}
+                      </Text>
+                      <View style={styles.metaRow}>
+                        {s.isAi && (
+                          <LinearGradient
+                            colors={["#B79BFF", "#8F72FF"]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                            style={styles.aiBadge}
+                          >
+                            <Ionicons name="sparkles" size={10} color="#fff" />
+                            <Text style={styles.aiBadgeText}>AI Generated</Text>
+                          </LinearGradient>
+                        )}
+                        <Text style={styles.confidenceText}>
+                          {scoreLabel(s.score)}
                         </Text>
-                      )}
+                      </View>
                     </View>
                   </View>
                 </Pressable>
               );
-            })}
-          </View>
-        )}
+            })
+          ) : !isWorking && hasRun ? (
+            // Empty State / No Match
+            <View style={styles.emptyState}>
+              <Ionicons
+                name="help-buoy-outline"
+                size={32}
+                color="rgba(255,255,255,0.3)"
+              />
+              <Text style={styles.emptyText}>No good match found.</Text>
+              <Pressable
+                onPress={onAddFromTranscript}
+                style={styles.secondaryAction}
+              >
+                <Text style={styles.secondaryActionText}>
+                  Use Transcript as Intent
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
       </ScrollView>
 
-      {/* Bottom Confirm CTA */}
-      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 14) }]}>
+      {/* Floating Bottom Bar */}
+      <View
+        style={[
+          styles.bottomBar,
+          { paddingBottom: Math.max(insets.bottom, 20) },
+        ]}
+      >
         <Pressable
-          onPress={onConfirm}
           disabled={!canConfirm}
-          style={({ pressed }) => [
-            styles.confirmBtn,
-            !canConfirm && styles.confirmBtnDisabled,
-            pressed && canConfirm && { opacity: 0.92 },
-          ]}
+          onPress={onConfirm}
+          style={[styles.confirmBtn, !canConfirm && styles.confirmDisabled]}
         >
-          <Ionicons
-            name="checkmark-circle"
-            size={20}
-            color={canConfirm ? "#0B1020" : "rgba(11,16,32,0.55)"}
-          />
-          <Text style={[styles.confirmText, !canConfirm && styles.confirmTextDisabled]}>
-            {isWorking ? "Saving…" : "Confirm"}
-          </Text>
+          <LinearGradient
+            colors={
+              canConfirm
+                ? ["#E6EFFF", "#C9DCFF"]
+                : ["rgba(255,255,255,0.1)", "rgba(255,255,255,0.05)"]
+            }
+            style={styles.confirmGradient}
+          >
+            {isWorking ? (
+              <Text style={[styles.confirmText, { color: COLORS.textDim }]}>
+                Saving...
+              </Text>
+            ) : (
+              <>
+                <Ionicons
+                  name="checkmark"
+                  size={20}
+                  color={canConfirm ? COLORS.night : COLORS.textDim}
+                />
+                <Text
+                  style={[
+                    styles.confirmText,
+                    !canConfirm && { color: COLORS.textDim },
+                  ]}
+                >
+                  Confirm Intent
+                </Text>
+              </>
+            )}
+          </LinearGradient>
         </Pressable>
       </View>
     </LinearGradient>
@@ -525,210 +513,208 @@ export default function ConfirmScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingHorizontal: 18 },
+  container: { flex: 1 },
 
-  headerRow: {
-    marginTop: 6,
+  // Atmosphere
+  atmosphere: { ...StyleSheet.absoluteFillObject, overflow: "hidden" },
+  meshA: {
+    position: "absolute",
+    top: -100,
+    right: -80,
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: "rgba(143,208,255,0.15)",
+  },
+  meshB: {
+    position: "absolute",
+    bottom: 100,
+    left: -100,
+    width: 350,
+    height: 350,
+    borderRadius: 175,
+    backgroundColor: "rgba(128,152,255,0.08)",
+  },
+
+  // Header
+  header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    marginBottom: 10,
   },
-  headerLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
-  appIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: "rgba(215,227,255,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.16)",
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.05)",
     alignItems: "center",
     justifyContent: "center",
   },
-  title: { color: "#EAF0FF", fontSize: 20, fontWeight: "900" },
-  subtitle: { color: "rgba(234,240,255,0.60)", fontSize: 12, marginTop: 2 },
-
-  card: {
-    marginTop: 18,
-    borderRadius: 22,
-    padding: 16,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
-  },
-  cardTitle: { color: "#EAF0FF", fontSize: 16, fontWeight: "900" },
-  cardHint: { marginTop: 6, color: "rgba(234,240,255,0.62)", fontSize: 12 },
-
-  actionsRow: { marginTop: 12, flexDirection: "row", gap: 10 },
-  actionBtn: {
-    flex: 1,
-    flexDirection: "row",
-    gap: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 12,
-    borderRadius: 16,
-    backgroundColor: "rgba(215,227,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.14)",
-  },
-  actionBtnDisabled: { opacity: 0.55 },
-  actionText: { color: "#D7E3FF", fontWeight: "900", fontSize: 14 },
-
-  primaryBtn: {
-    marginTop: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 13,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    backgroundColor: "#D7E3FF",
-    borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.55)",
-  },
-  primaryBtnDisabled: {
-    backgroundColor: "rgba(215,227,255,0.22)",
-    borderColor: "rgba(215,227,255,0.25)",
-  },
-  primaryBtnText: { color: "#0B1020", fontWeight: "900", fontSize: 14 },
-  primaryBtnTextDisabled: { color: "rgba(11,16,32,0.55)" },
-
-  statusBox: {
-    marginTop: 12,
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-    padding: 12,
-    borderRadius: 14,
-    backgroundColor: "rgba(191,210,255,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(191,210,255,0.10)",
-  },
-  statusText: {
-    flex: 1,
-    color: "rgba(234,240,255,0.75)",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-
-  sectionHeader: { marginTop: 16, marginBottom: 8 },
-  sectionTitle: { color: "#EAF0FF", fontSize: 14, fontWeight: "900" },
-  sectionHint: { marginTop: 4, color: "rgba(234,240,255,0.55)", fontSize: 12 },
-
-  empty: {
-    marginTop: 12,
-    borderRadius: 22,
-    padding: 18,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
-    alignItems: "center",
-    gap: 8,
-  },
-  emptyTitle: {
-    color: "#EAF0FF",
-    fontWeight: "900",
+  headerTitle: {
     fontSize: 16,
-    marginTop: 4,
-    textAlign: "center",
+    fontWeight: "700",
+    color: COLORS.text,
+    letterSpacing: 0.5,
   },
-  emptyText: { color: "rgba(234,240,255,0.65)", fontSize: 12, textAlign: "center" },
-
-  secondaryBtn: {
-    width: "100%",
-    flexDirection: "row",
-    gap: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 12,
-    borderRadius: 16,
-    backgroundColor: "rgba(215,227,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.14)",
-  },
-  secondaryBtnDisabled: { opacity: 0.55 },
-  secondaryBtnText: { color: "#D7E3FF", fontWeight: "900", fontSize: 14 },
-
-  suggCard: {
-    borderRadius: 22,
-    padding: 14,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
-  },
-  suggCardActive: {
-    backgroundColor: "rgba(215,227,255,0.10)",
-    borderColor: "rgba(215,227,255,0.18)",
-  },
-  suggCardAi: {
-    backgroundColor: "rgba(147,112,219,0.08)",
-    borderColor: "rgba(147,112,219,0.20)",
-  },
-  suggTopRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-
-  radio: {
-    width: 20,
-    height: 20,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  radioHollow: {
-    width: 18,
-    height: 18,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.30)",
-  },
-  radioDot: {
-    width: 18,
-    height: 18,
-    borderRadius: 999,
-    backgroundColor: "rgba(215,227,255,0.90)",
-  },
-
-  suggLabel: { flex: 1, color: "#EAF0FF", fontSize: 14, fontWeight: "900" },
-
-  scorePill: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: "rgba(215,227,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.14)",
+  secureBadge: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
+    backgroundColor: "rgba(166,255,201,0.1)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(166,255,201,0.2)",
   },
-  scorePillAi: {
-    backgroundColor: "rgba(147,112,219,0.15)",
-    borderColor: "rgba(147,112,219,0.30)",
-  },
-  scorePillText: { color: "rgba(234,240,255,0.75)", fontSize: 11, fontWeight: "800" },
+  secureText: { fontSize: 10, fontWeight: "700", color: COLORS.success },
 
-  bottomBar: {
-    position: "absolute",
-    left: 18,
-    right: 18,
-    bottom: 0,
-    paddingTop: 10,
+  // Player
+  glassPanel: {
+    backgroundColor: COLORS.glassFill,
+    borderWidth: 1,
+    borderColor: COLORS.glassBorder,
+    borderRadius: 24,
+    padding: 16,
+    marginBottom: 24,
   },
-  confirmBtn: {
+  playerRow: {
     flexDirection: "row",
-    gap: 10,
+    alignItems: "center",
+    gap: 14,
+  },
+  iconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(143,208,255,0.1)",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 14,
+  },
+  playerInfo: { flex: 1 },
+  playerLabel: { color: COLORS.text, fontSize: 15, fontWeight: "700" },
+  playerSub: { color: COLORS.textDim, fontSize: 12 },
+  playBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.text,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  // Status & List
+  statusArea: { minHeight: 40, justifyContent: "center", marginBottom: 12 },
+  workingState: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  workingText: { color: COLORS.accent, fontSize: 14, fontWeight: "600" },
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  sectionTitle: {
+    color: COLORS.textDim,
+    fontSize: 13,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    fontWeight: "700",
+  },
+  retryText: { color: COLORS.accent, fontSize: 13 },
+
+  listContainer: { gap: 10 },
+  suggestionCard: {
+    backgroundColor: "rgba(255,255,255,0.03)",
     borderRadius: 18,
-    backgroundColor: "#D7E3FF",
+    padding: 16,
     borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.55)",
+    borderColor: "rgba(255,255,255,0.05)",
   },
-  confirmBtnDisabled: {
-    backgroundColor: "rgba(215,227,255,0.22)",
-    borderColor: "rgba(215,227,255,0.25)",
+  suggestionSelected: {
+    backgroundColor: COLORS.activeFill,
+    borderColor: "rgba(143,208,255,0.4)",
   },
-  confirmText: { color: "#0B1020", fontWeight: "900", fontSize: 15 },
-  confirmTextDisabled: { color: "rgba(11,16,32,0.55)" },
+  suggestionRow: { flexDirection: "row", gap: 12, alignItems: "center" },
+  radio: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.3)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  radioActive: { borderColor: COLORS.accent },
+  radioDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: COLORS.accent,
+  },
+  intentLabel: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.9)",
+    marginBottom: 4,
+  },
+  metaRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  confidenceText: { fontSize: 11, color: "rgba(255,255,255,0.5)" },
+  aiBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  aiBadgeText: { fontSize: 10, fontWeight: "800", color: "#fff" },
+
+  emptyState: { alignItems: "center", padding: 20, gap: 10 },
+  emptyText: { color: COLORS.textDim },
+  secondaryAction: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 8,
+  },
+  secondaryActionText: { color: COLORS.text, fontSize: 12, fontWeight: "600" },
+
+  // Bottom Bar
+  bottomBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
+  confirmBtn: {
+    height: 56,
+    borderRadius: 28,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+  },
+  confirmGradient: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  confirmDisabled: { opacity: 0.8 },
+  confirmText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: COLORS.night,
+  },
 });
