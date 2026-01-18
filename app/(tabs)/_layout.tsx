@@ -1,17 +1,28 @@
 import { Ionicons } from "@expo/vector-icons";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { BlurView } from "expo-blur";
+import * as Haptics from "expo-haptics";
 import { Tabs } from "expo-router";
 import React, { useEffect, useRef } from "react";
 import {
   Animated,
+  LayoutAnimation,
   Platform,
   Pressable,
   StyleSheet,
   Text,
+  UIManager,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+// Enable LayoutAnimation on Android
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 function iconFor(routeName: string, focused: boolean) {
   switch (routeName) {
@@ -35,11 +46,11 @@ function PremiumTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       style={[
         styles.wrapper,
         {
-          paddingBottom: Math.max(insets.bottom, 10),
+          paddingBottom: Math.max(insets.bottom, 12),
         },
       ]}
     >
-      <BlurView intensity={28} tint="dark" style={styles.blur}>
+      <BlurView intensity={40} tint="dark" style={styles.blur}>
         <View style={styles.inner}>
           {state.routes.map((route, index) => {
             const { options } = descriptors[route.key];
@@ -47,8 +58,8 @@ function PremiumTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
               options.tabBarLabel !== undefined
                 ? (options.tabBarLabel as string)
                 : options.title !== undefined
-                ? options.title
-                : route.name;
+                  ? options.title
+                  : route.name;
 
             const isFocused = state.index === index;
 
@@ -60,6 +71,14 @@ function PremiumTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
               });
 
               if (!isFocused && !event.defaultPrevented) {
+                // 1. Trigger Haptics for physical feel
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+                // 2. Animate layout changes (expansion/collapse)
+                LayoutAnimation.configureNext(
+                  LayoutAnimation.Presets.easeInEaseOut,
+                );
+
                 navigation.navigate(route.name);
               }
             };
@@ -91,59 +110,48 @@ function TabItem({
   focused: boolean;
   onPress: () => void;
 }) {
-  const scale = useRef(new Animated.Value(1)).current;
-  const glow = useRef(new Animated.Value(0)).current;
+  // We only animate opacity/scale here. Width is handled by LayoutAnimation in the parent.
+  const animValue = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.spring(scale, {
-        toValue: focused ? 1.06 : 1,
-        useNativeDriver: true,
-        speed: 14,
-        bounciness: 8,
-      }),
-      Animated.timing(glow, {
-        toValue: focused ? 1 : 0,
-        duration: focused ? 180 : 220,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [focused, scale, glow]);
+    Animated.timing(animValue, {
+      toValue: focused ? 1 : 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [focused, animValue]);
 
-  const activeOpacity = glow.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 1],
-  });
-
-  const activeScale = glow.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.96, 1],
-  });
-
-  const iconColor = focused ? "#EAF0FF" : "rgba(215,227,255,0.50)";
-  const textColor = focused ? "#D7E3FF" : "rgba(215,227,255,0.45)";
+  const activeColor = "#EAF0FF";
+  const inactiveColor = "rgba(215,227,255,0.5)";
 
   return (
-    <Pressable onPress={onPress} style={styles.itemPressable}>
-      <Animated.View style={[styles.item, { transform: [{ scale }] }]}>
-        {/* Active pill */}
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.activePill,
-            {
-              opacity: activeOpacity,
-              transform: [{ scale: activeScale }],
-            },
-          ]}
+    <Pressable
+      onPress={onPress}
+      style={[
+        styles.itemPressable,
+        focused ? styles.itemPressableActive : styles.itemPressableInactive,
+      ]}
+    >
+      <View style={[styles.item, focused && styles.itemActive]}>
+        {/* Icon */}
+        <Ionicons
+          name={iconName}
+          size={20}
+          color={focused ? activeColor : inactiveColor}
         />
 
-        {/* Label */}
-        <View style={styles.labelRow}>
-          <Ionicons name={iconName} size={18} color={iconColor} />
-          <Text style={[styles.label, { color: textColor }]}>{label}</Text>
-        </View>
-      </Animated.View>
+        {/* Label - Only rendered if focused to allow LayoutAnimation to collapse the width */}
+        {focused && (
+          <Animated.View style={{ opacity: animValue, marginLeft: 6 }}>
+            <Text
+              style={[styles.label, { color: activeColor }]}
+              numberOfLines={1}
+            >
+              {label}
+            </Text>
+          </Animated.View>
+        )}
+      </View>
     </Pressable>
   );
 }
@@ -167,65 +175,58 @@ export default function TabsLayout() {
 const styles = StyleSheet.create({
   wrapper: {
     position: "absolute",
-    left: 14,
-    right: 14,
-    bottom: 12,
+    left: 20,
+    right: 20,
+    bottom: 0,
+    alignItems: "center", // Center the blur view horizontally
   },
   blur: {
-    borderRadius: 22,
+    borderRadius: 30,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
-    backgroundColor: "rgba(10,16,32,0.55)",
+    borderColor: "rgba(255,255,255,0.12)", // Slightly more visible border
+    backgroundColor: "rgba(10,16,32,0.6)", // Darker glass
+    width: "100%",
+    // Enhanced shadows for depth
     shadowColor: "#000",
-    shadowOpacity: 0.35,
-    shadowRadius: 18,
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
     shadowOffset: { width: 0, height: 10 },
-    elevation: 18,
+    elevation: 20,
   },
   inner: {
     flexDirection: "row",
-    paddingHorizontal: 8,
-    paddingTop: 10,
-    paddingBottom: Platform.select({ ios: 10, android: 12 }),
-    gap: 6,
+    padding: 6,
+    alignItems: "center",
     justifyContent: "space-between",
   },
   itemPressable: {
-    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    height: 50,
+    borderRadius: 25,
+  },
+  // Dynamic widths for expansion effect
+  itemPressableActive: {
+    flex: 2, // Takes up more space
+  },
+  itemPressableInactive: {
+    flex: 1, // Takes up less space
   },
   item: {
-    height: 54,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-    position: "relative",
-  },
-  activePill: {
-    position: "absolute",
-    left: 6,
-    right: 6,
-    top: 6,
-    bottom: 6,
-    borderRadius: 16,
-    backgroundColor: "rgba(215,227,255,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.18)",
-  },
-  iconWrap: {
-    position: "relative",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  labelRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    justifyContent: "center",
+    height: "100%",
+    width: "100%",
+    borderRadius: 24,
+  },
+  itemActive: {
+    backgroundColor: "rgba(215,227,255,0.15)",
   },
   label: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.2,
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 0.3,
   },
 });
