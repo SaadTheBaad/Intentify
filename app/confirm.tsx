@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
+import * as Haptics from "expo-haptics";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -10,6 +11,11 @@ import {
   Text,
   View,
 } from "react-native";
+import Animated, {
+  useAnimatedStyle,
+  withSpring,
+  useSharedValue,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
@@ -81,6 +87,24 @@ export default function ConfirmScreen() {
 
   const [pending, setPending] = useState<PendingRecording | null>(null);
 
+  const [pipelineStep, setPipelineStep] = useState(0); // 0: upload, 1: transcribe, 2: match, 3: suggest
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    if (isWorking && !pending) {
+      progress.value = withSpring((pipelineStep + 1) / 4, {
+        damping: 20,
+        stiffness: 100,
+      });
+    } else {
+      progress.value = 0;
+    }
+  }, [pipelineStep, isWorking, pending]);
+
+  const progressStyle = useAnimatedStyle(() => ({
+    width: `${progress.value * 100}%`,
+  }));
+
   const onPlay = async () => {
     if (!safeUri) return;
     await playRecording(safeUri);
@@ -123,6 +147,7 @@ export default function ConfirmScreen() {
     };
 
     try {
+      setPipelineStep(0);
       const deviceId = await getOrCreateDeviceId();
       const recordingId = `${Date.now()}`;
       const createdAt = new Date().toISOString();
@@ -133,6 +158,7 @@ export default function ConfirmScreen() {
       setStatusSafe("Uploading audio…");
       await uploadToPresignedUrl(uploadUrl, safeUri);
 
+      setPipelineStep(1);
       setStatusSafe("Transcribing…");
       const tRes = await transcribeFromS3(deviceId, key);
       const transcript = (tRes.transcript || "").trim();
@@ -141,6 +167,7 @@ export default function ConfirmScreen() {
         throw new Error("No transcript returned (try recording again).");
       }
 
+      setPipelineStep(2);
       setStatusSafe("Finding best intent…");
       const matchRes = await matchIntents(deviceId, transcript, TOP_K);
       const matched = (matchRes.suggestions || []).filter(
@@ -151,6 +178,7 @@ export default function ConfirmScreen() {
         matched.length === 0 || matched.every((s) => s.score < LOW_SCORE_THRESHOLD);
 
       if (needsAiSuggestion) {
+        setPipelineStep(3);
         setStatusSafe("Generating AI suggestion…");
         const aiRes = await suggestIntent(transcript);
 
@@ -219,6 +247,7 @@ export default function ConfirmScreen() {
     if (!selected) return;
 
     try {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setIsWorking(true);
       setStatus("Saving…");
 
@@ -331,6 +360,16 @@ export default function ConfirmScreen() {
       <ScrollView contentContainerStyle={{ paddingBottom: 110 }} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.headerRow}>
+          <Pressable
+            onPress={() => router.back()}
+            style={({ pressed }) => [
+              styles.backButton,
+              pressed && { opacity: 0.7 },
+            ]}
+          >
+            <Ionicons name="chevron-back" size={24} color="#D7E3FF" />
+          </Pressable>
+
           <View style={styles.headerLeft}>
             <View style={styles.appIcon}>
               <Ionicons name="checkmark-done" size={18} color="#D7E3FF" />
@@ -397,8 +436,17 @@ export default function ConfirmScreen() {
 
           {status ? (
             <View style={styles.statusBox}>
-              <Ionicons name="information-circle" size={16} color="#BFD2FF" />
-              <Text style={styles.statusText}>{status}</Text>
+              <View style={{ flex: 1 }}>
+                <View style={styles.statusHeader}>
+                  <Ionicons name="sparkles" size={14} color="#BFD2FF" />
+                  <Text style={styles.statusText}>{status}</Text>
+                </View>
+                {isWorking && !pending && (
+                  <View style={styles.progressBarBg}>
+                    <Animated.View style={[styles.progressBarFill, progressStyle]} />
+                  </View>
+                )}
+              </View>
             </View>
           ) : null}
         </View>
@@ -531,8 +579,13 @@ const styles = StyleSheet.create({
     marginTop: 6,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
+    justifyContent: "flex-start",
+    gap: 8,
+  },
+  backButton: {
+    padding: 8,
+    marginLeft: -8,
+    borderRadius: 12,
   },
   headerLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
   appIcon: {
@@ -605,11 +658,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(191,210,255,0.10)",
   },
+  statusHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 6,
+  },
   statusText: {
     flex: 1,
     color: "rgba(234,240,255,0.75)",
     fontSize: 12,
     fontWeight: "700",
+  },
+  progressBarBg: {
+    height: 4,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: 2,
+    overflow: "hidden",
+    marginTop: 4,
+  },
+  progressBarFill: {
+    height: "100%",
+    backgroundColor: "#D7E3FF",
+    borderRadius: 2,
   },
 
   sectionHeader: { marginTop: 16, marginBottom: 8 },

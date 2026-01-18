@@ -1,9 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -23,6 +25,34 @@ export default function RecordScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [lastUri, setLastUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // --- Timer ---
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (isRecording) {
+      const startTime = Date.now();
+      timerRef.current = setInterval(() => {
+        setElapsedTime(Date.now() - startTime);
+      }, 50); // 20fps for the timer is plenty smooth without killing performance
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+      setElapsedTime(0);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isRecording]);
+
+  const formatTime = (ms: number) => {
+    const minutes = Math.floor(ms / 60000);
+    const seconds = Math.floor((ms % 60000) / 1000);
+    const centiseconds = Math.floor((ms % 1000) / 10);
+    return `${minutes.toString().padStart(2, "0")}:${seconds
+      .toString()
+      .padStart(2, "0")}.${centiseconds.toString().padStart(2, "0")}`;
+  };
 
   // --- Animations ---
   const scale = useRef(new Animated.Value(1)).current;
@@ -63,9 +93,11 @@ export default function RecordScreen() {
       ]).start();
 
       if (!isRecording) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         await startRecording();
         setIsRecording(true);
       } else {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         const res = await stopRecording();
         setIsRecording(false);
         setLastUri(res.uri);
@@ -149,6 +181,11 @@ export default function RecordScreen() {
         </Text>
 
         <View style={styles.recordZone}>
+          {/* Timer */}
+          {isRecording && (
+            <Text style={styles.timerText}>{formatTime(elapsedTime)}</Text>
+          )}
+
           {/* Pulse ring (only visible while recording) */}
           {isRecording ? (
             <Animated.View
@@ -318,6 +355,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     height: 190,
+    position: "relative",
+  },
+  timerText: {
+    position: "absolute",
+    top: -34, // Moved further above the record button
+    color: "#FFFFFF",
+    fontSize: 24,
+    fontWeight: "700",
+    fontFamily: Platform.select({ ios: "Courier", android: "monospace" }),
   },
   pulseRing: {
     position: "absolute",

@@ -228,9 +228,14 @@ export default function HistoryScreen() {
     >
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.title}>History</Text>
-          <Text style={styles.subtitle}>Your recent recordings and intents</Text>
+        <View style={styles.headerLeft}>
+          <View style={styles.appIcon}>
+            <Ionicons name="time" size={18} color="#D7E3FF" />
+          </View>
+          <View>
+            <Text style={styles.title}>History</Text>
+            <Text style={styles.subtitle}>Your recent recordings and intents</Text>
+          </View>
         </View>
 
         <View style={styles.headerActions}>
@@ -351,12 +356,27 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: "row",
-    alignItems: "flex-end",
+    alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
   },
-  title: { color: "#EAF0FF", fontSize: 26, fontWeight: "900" },
-  subtitle: { marginTop: 4, color: "rgba(234,240,255,0.60)", fontSize: 12 },
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  appIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: "rgba(215,227,255,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(215,227,255,0.16)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  title: { color: "#EAF0FF", fontSize: 22, fontWeight: "900" },
+  subtitle: { color: "rgba(234,240,255,0.60)", fontSize: 12, marginTop: 2 },
 
   headerActions: { flexDirection: "row", gap: 10 },
   iconBtn: {

@@ -2,15 +2,20 @@ import { Ionicons } from "@expo/vector-icons";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { BlurView } from "expo-blur";
 import { Tabs } from "expo-router";
-import React, { useEffect, useRef } from "react";
+import * as Haptics from "expo-haptics";
+import React, { useEffect, useRef, useState } from "react";
 import {
-  Animated,
   Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import Animated, {
+  useAnimatedStyle,
+  withSpring,
+  useSharedValue,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 function iconFor(routeName: string, focused: boolean) {
@@ -28,6 +33,29 @@ function iconFor(routeName: string, focused: boolean) {
 
 function PremiumTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const [containerWidth, setContainerWidth] = useState(0);
+  const translateX = useSharedValue(0);
+
+  const numTabs = state.routes.length;
+  const tabWidth = containerWidth / numTabs;
+
+  useEffect(() => {
+    if (containerWidth > 0) {
+      translateX.value = withSpring(state.index * tabWidth, {
+        damping: 30, // Increased damping to reduce bounce
+        stiffness: 120, // Slightly reduced stiffness for smoother arrival
+      });
+    }
+  }, [state.index, tabWidth, containerWidth]);
+
+  const animatedStyle = useAnimatedStyle(() => {
+    const barWidth = tabWidth * 0.45; // Significantly shorter bar
+    const centeringOffset = (tabWidth - barWidth) / 2;
+    return {
+      transform: [{ translateX: translateX.value + centeringOffset }],
+      width: barWidth,
+    };
+  });
 
   return (
     <View
@@ -40,7 +68,15 @@ function PremiumTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       ]}
     >
       <BlurView intensity={28} tint="dark" style={styles.blur}>
-        <View style={styles.inner}>
+        <View
+          style={styles.inner}
+          onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width - 16)}
+        >
+          {/* Animated Background Pill */}
+          {containerWidth > 0 && (
+            <Animated.View style={[styles.activePill, animatedStyle]} />
+          )}
+
           {state.routes.map((route, index) => {
             const { options } = descriptors[route.key];
             const label =
@@ -53,6 +89,7 @@ function PremiumTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             const isFocused = state.index === index;
 
             const onPress = () => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               const event = navigation.emit({
                 type: "tabPress",
                 target: route.key,
@@ -91,33 +128,19 @@ function TabItem({
   focused: boolean;
   onPress: () => void;
 }) {
-  const scale = useRef(new Animated.Value(1)).current;
-  const glow = useRef(new Animated.Value(0)).current;
+  const scale = useSharedValue(1);
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.spring(scale, {
-        toValue: focused ? 1.06 : 1,
-        useNativeDriver: true,
-        speed: 14,
-        bounciness: 8,
-      }),
-      Animated.timing(glow, {
-        toValue: focused ? 1 : 0,
-        duration: focused ? 180 : 220,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [focused, scale, glow]);
+    scale.value = withSpring(focused ? 1.06 : 1, {
+      damping: 15,
+      stiffness: 150,
+    });
+  }, [focused]);
 
-  const activeOpacity = glow.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 1],
-  });
-
-  const activeScale = glow.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.96, 1],
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ scale: scale.value }],
+    };
   });
 
   const iconColor = focused ? "#EAF0FF" : "rgba(215,227,255,0.50)";
@@ -125,19 +148,7 @@ function TabItem({
 
   return (
     <Pressable onPress={onPress} style={styles.itemPressable}>
-      <Animated.View style={[styles.item, { transform: [{ scale }] }]}>
-        {/* Active pill */}
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.activePill,
-            {
-              opacity: activeOpacity,
-              transform: [{ scale: activeScale }],
-            },
-          ]}
-        />
-
+      <Animated.View style={[styles.item, animatedStyle]}>
         {/* Label */}
         <View style={styles.labelRow}>
           <Ionicons name={iconName} size={18} color={iconColor} />
@@ -204,14 +215,13 @@ const styles = StyleSheet.create({
   },
   activePill: {
     position: "absolute",
-    left: 6,
-    right: 6,
-    top: 6,
-    bottom: 6,
-    borderRadius: 16,
-    backgroundColor: "rgba(215,227,255,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(215,227,255,0.18)",
+    left: 0,
+    top: 6, // Slightly larger to cover more area
+    bottom: Platform.select({ ios: 6, android: 8 }),
+    borderRadius: 0, // Completely square as requested
+    backgroundColor: "rgba(215,227,255,0.30)", // Even more opaque for visibility
+    borderWidth: 2, // Thicker border
+    borderColor: "rgba(215,227,255,0.60)", // Brighter border
   },
   iconWrap: {
     position: "relative",

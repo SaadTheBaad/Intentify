@@ -92,10 +92,15 @@ export default function IntentsScreen() {
     >
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Intents</Text>
-        <Text style={styles.subtitle}>
-          Your approved phrases (used as suggestions during confirmation).
-        </Text>
+        <View style={styles.headerLeft}>
+          <View style={styles.appIcon}>
+            <Ionicons name="flash" size={18} color="#D7E3FF" />
+          </View>
+          <View>
+            <Text style={styles.title}>Intents</Text>
+            <Text style={styles.subtitle}>Approved phrases for suggestions</Text>
+          </View>
+        </View>
       </View>
 
       {/* Error */}
@@ -174,9 +179,28 @@ export default function IntentsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, paddingHorizontal: 18 },
 
-  header: { marginBottom: 10 },
-  title: { color: "#EAF0FF", fontSize: 26, fontWeight: "900" },
-  subtitle: { marginTop: 6, color: "rgba(234,240,255,0.60)", fontSize: 12, lineHeight: 16 },
+  header: {
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  appIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: "rgba(215,227,255,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(215,227,255,0.16)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  title: { color: "#EAF0FF", fontSize: 22, fontWeight: "900" },
+  subtitle: { color: "rgba(234,240,255,0.60)", fontSize: 12, marginTop: 2 },
 
   errorBox: {
     marginTop: 10,
