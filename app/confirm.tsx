@@ -121,10 +121,17 @@ export default function ConfirmScreen() {
   const onPlay = async () => {
     if (!safeUri) return;
     setIsPlaying(true);
-    await playRecording(safeUri);
-    // Simple timeout to reset play state since we don't have an event listener in this snippet
-    // In a real app, use the sound object's status update
-    setTimeout(() => setIsPlaying(false), 3000);
+    await playRecording(safeUri, {
+      onStatus: (status) => {
+        if (!status.isLoaded) {
+          setIsPlaying(false);
+          return;
+        }
+        if (status.didJustFinish) {
+          setIsPlaying(false);
+        }
+      },
+    });
   };
 
   const onStop = async () => {

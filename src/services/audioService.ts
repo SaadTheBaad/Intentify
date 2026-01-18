@@ -1,4 +1,4 @@
-import { Audio } from "expo-av";
+import { Audio, type AVPlaybackStatus } from "expo-av";
 
 export type RecordingResult = {
   uri: string;
@@ -9,6 +9,8 @@ export type MeteringCallback = (
   metering: number | null,
   status: Audio.RecordingStatus,
 ) => void;
+
+export type PlaybackStatusCallback = (status: AVPlaybackStatus) => void;
 
 let recording: Audio.Recording | null = null;
 let sound: Audio.Sound | null = null;
@@ -82,7 +84,10 @@ export async function stopRecording(): Promise<RecordingResult> {
   };
 }
 
-export async function playRecording(uri: string) {
+export async function playRecording(
+  uri: string,
+  options?: { onStatus?: PlaybackStatusCallback },
+) {
   // Stop/unload any previous playback
   if (sound) {
     await sound.stopAsync();
@@ -100,11 +105,15 @@ export async function playRecording(uri: string) {
     { uri },
     { shouldPlay: true },
   );
+  if (options?.onStatus) {
+    newSound.setOnPlaybackStatusUpdate(options.onStatus);
+  }
   sound = newSound;
 }
 
 export async function stopPlayback() {
   if (!sound) return;
+  sound.setOnPlaybackStatusUpdate(null);
   await sound.stopAsync();
   await sound.unloadAsync();
   sound = null;
