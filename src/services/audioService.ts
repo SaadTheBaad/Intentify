@@ -20,17 +20,19 @@ function withMeteringEnabled(
   return {
     ...options,
     android: {
-      ...options.android,
+      ...(options.android as any),
       isMeteringEnabled: true,
     },
     ios: {
-      ...options.ios,
+      ...(options.ios as any),
       isMeteringEnabled: true,
     },
   };
 }
 
-export async function startRecording(options?: { onMetering?: MeteringCallback }) {
+export async function startRecording(options?: {
+  onMetering?: MeteringCallback;
+}) {
   const perm = await Audio.requestPermissionsAsync();
   if (!perm.granted) throw new Error("Microphone permission not granted");
 
