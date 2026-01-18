@@ -5,10 +5,32 @@ export type RecordingResult = {
   durationMillis?: number;
 };
 
+export type MeteringCallback = (
+  metering: number | null,
+  status: Audio.RecordingStatus,
+) => void;
+
 let recording: Audio.Recording | null = null;
 let sound: Audio.Sound | null = null;
+let onMetering: MeteringCallback | null = null;
 
-export async function startRecording() {
+function withMeteringEnabled(
+  options: Audio.RecordingOptions,
+): Audio.RecordingOptions {
+  return {
+    ...options,
+    android: {
+      ...options.android,
+      isMeteringEnabled: true,
+    },
+    ios: {
+      ...options.ios,
+      isMeteringEnabled: true,
+    },
+  };
+}
+
+export async function startRecording(options?: { onMetering?: MeteringCallback }) {
   const perm = await Audio.requestPermissionsAsync();
   if (!perm.granted) throw new Error("Microphone permission not granted");
 
@@ -18,7 +40,22 @@ export async function startRecording() {
   });
 
   const rec = new Audio.Recording();
-  await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+  onMetering = options?.onMetering ?? null;
+
+  if (onMetering) {
+    rec.setProgressUpdateInterval(120);
+    rec.setOnRecordingStatusUpdate((status) => {
+      if (!status.isRecording) return;
+      const metering =
+        "metering" in status && typeof status.metering === "number"
+          ? status.metering
+          : null;
+      onMetering?.(metering, status);
+    });
+  }
+
+  const baseOptions = Audio.RecordingOptionsPresets.HIGH_QUALITY;
+  await rec.prepareToRecordAsync(withMeteringEnabled(baseOptions));
   await rec.startAsync();
   recording = rec;
 }
@@ -28,6 +65,8 @@ export async function stopRecording(): Promise<RecordingResult> {
 
   const rec = recording;
   recording = null;
+  onMetering = null;
+  rec.setOnRecordingStatusUpdate(null);
 
   await rec.stopAndUnloadAsync();
   const uri = rec.getURI();

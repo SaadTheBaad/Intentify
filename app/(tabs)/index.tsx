@@ -12,12 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import {
-  playRecording,
-  startRecording,
-  stopPlayback,
-  stopRecording,
-} from "../../src/services/audioService";
+import { startRecording, stopRecording } from "../../src/services/audioService";
 
 const COLORS = {
   ink: "#0B0E16",
@@ -66,11 +61,29 @@ const MOTION = {
   slow: 560,
 };
 
+const normalizeMetering = (metering: number | null) => {
+  if (metering === null || Number.isNaN(metering)) return 0;
+  const clamped = Math.max(-60, Math.min(0, metering));
+  return (clamped + 60) / 60;
+};
+
+const formatElapsed = (ms: number) => {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+};
+
+const BAR_COUNT = 36;
+
 export default function RecordScreen() {
   const insets = useSafeAreaInsets();
   const [isRecording, setIsRecording] = useState(false);
   const [lastUri, setLastUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const startedAtRef = useRef<number | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // --- Animations ---
   const scale = useRef(new Animated.Value(1)).current;
@@ -79,6 +92,7 @@ export default function RecordScreen() {
   const introCard = useRef(new Animated.Value(0)).current;
   const introFooter = useRef(new Animated.Value(0)).current;
   const statusAnim = useRef(new Animated.Value(0)).current;
+  const wave = useRef(new Animated.Value(0)).current;
 
   const pulseAnim = useMemo(() => {
     return Animated.loop(
@@ -93,7 +107,7 @@ export default function RecordScreen() {
           duration: 700,
           useNativeDriver: true,
         }),
-      ])
+      ]),
     );
   }, [pulse]);
 
@@ -126,6 +140,7 @@ export default function RecordScreen() {
     } else {
       pulseAnim.stop();
       pulse.setValue(0);
+      wave.setValue(0);
     }
 
     Animated.timing(statusAnim, {
@@ -134,7 +149,29 @@ export default function RecordScreen() {
       easing: Easing.out(Easing.quad),
       useNativeDriver: true,
     }).start();
-  }, [isRecording, pulse, pulseAnim, statusAnim]);
+  }, [isRecording, pulse, pulseAnim, statusAnim, wave]);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  const startTimer = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    startedAtRef.current = Date.now();
+    setElapsedMs(0);
+    timerRef.current = setInterval(() => {
+      if (!startedAtRef.current) return;
+      setElapsedMs(Date.now() - startedAtRef.current);
+    }, 200);
+  };
+
+  const stopTimer = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = null;
+    startedAtRef.current = null;
+  };
 
   const onRecordPress = async () => {
     setError(null);
@@ -153,12 +190,24 @@ export default function RecordScreen() {
       ]).start();
 
       if (!isRecording) {
-        await startRecording();
+        startTimer();
+        await startRecording({
+          onMetering: (metering) => {
+            const normalized = normalizeMetering(metering);
+            Animated.timing(wave, {
+              toValue: normalized,
+              duration: 120,
+              easing: Easing.out(Easing.quad),
+              useNativeDriver: false,
+            }).start();
+          },
+        });
         setIsRecording(true);
       } else {
         const res = await stopRecording();
         setIsRecording(false);
         setLastUri(res.uri);
+        stopTimer();
 
         router.push({
           pathname: "/confirm",
@@ -167,26 +216,8 @@ export default function RecordScreen() {
       }
     } catch (e: any) {
       setIsRecording(false);
+      stopTimer();
       setError(e?.message ?? "Recording error");
-    }
-  };
-
-  const onPlayPress = async () => {
-    if (!lastUri) return;
-    setError(null);
-    try {
-      await playRecording(lastUri);
-    } catch (e: any) {
-      setError(e?.message ?? "Playback error");
-    }
-  };
-
-  const onStopPress = async () => {
-    setError(null);
-    try {
-      await stopPlayback();
-    } catch (e: any) {
-      setError(e?.message ?? "Stop playback error");
     }
   };
 
@@ -198,6 +229,29 @@ export default function RecordScreen() {
   const ringOpacity = pulse.interpolate({
     inputRange: [0, 1],
     outputRange: [0.35, 0],
+  });
+
+  const barFactors = useMemo(() => {
+    return Array.from({ length: BAR_COUNT }, (_, index) => {
+      const phase = (index / (BAR_COUNT - 1)) * Math.PI;
+      const curve = Math.sin(phase);
+      const wobble = 0.22 * Math.sin(index * 1.7);
+      return 0.25 + curve * 0.9 + wobble;
+    });
+  }, []);
+
+  const barHeights = useMemo(() => {
+    return barFactors.map((factor) =>
+      wave.interpolate({
+        inputRange: [0, 1],
+        outputRange: [6, 6 + factor * 36],
+      }),
+    );
+  }, [barFactors, wave]);
+
+  const waveOpacity = wave.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.35, 0.95],
   });
 
   const headerTranslate = introHeader.interpolate({
@@ -261,7 +315,6 @@ export default function RecordScreen() {
           </View>
           <View>
             <Text style={styles.title}>Intentify</Text>
-            <Text style={styles.subtitle}>Record -> confirm intent -> upload</Text>
           </View>
         </View>
 
@@ -273,8 +326,12 @@ export default function RecordScreen() {
           ]}
         >
           <Animated.View style={[styles.chipGlow, { opacity: statusAnim }]} />
-          <View style={[styles.dot, isRecording ? styles.dotLive : styles.dotIdle]} />
-          <Text style={styles.chipText}>{isRecording ? "Recording" : "Ready"}</Text>
+          <View
+            style={[styles.dot, isRecording ? styles.dotLive : styles.dotIdle]}
+          />
+          <Text style={styles.chipText}>
+            {isRecording ? "Listening" : "Ready"}
+          </Text>
         </Animated.View>
       </Animated.View>
 
@@ -291,7 +348,8 @@ export default function RecordScreen() {
         <View style={styles.stageHeader}>
           <Text style={styles.cardTitle}>Tap to record</Text>
           <Text style={styles.cardHint}>
-            Keep it short and clear. You will review it on the next screen.
+            Say it however you can. You’ll confirm the meaning on the next
+            screen.
           </Text>
         </View>
 
@@ -329,51 +387,25 @@ export default function RecordScreen() {
           </Animated.View>
         </View>
 
-        {/* Secondary Actions */}
-        <View style={styles.actionsRow}>
-          <Pressable
-            onPress={onPlayPress}
-            disabled={!lastUri}
-            style={({ pressed }) => [
-              styles.actionBtn,
-              !lastUri && styles.actionBtnDisabled,
-              pressed && lastUri && styles.actionBtnPressed,
+        {/* Visualizer */}
+        <View style={styles.visualizerHeader}>
+          <View
+            style={[
+              styles.recDot,
+              isRecording ? styles.recDotLive : styles.recDotIdle,
             ]}
-          >
-            <Ionicons name="play" size={18} color={lastUri ? COLORS.text : "#5D6A88"} />
-            <Text style={[styles.actionText, !lastUri && styles.actionTextDisabled]}>
-              Play
-            </Text>
-          </Pressable>
-
-          <Pressable
-            onPress={onStopPress}
-            style={({ pressed }) => [
-              styles.actionBtn,
-              pressed && styles.actionBtnPressed,
-            ]}
-          >
-            <Ionicons name="close" size={18} color={COLORS.text} />
-            <Text style={styles.actionText}>Stop</Text>
-          </Pressable>
+          />
+          <Text style={styles.timerText}>{formatElapsed(elapsedMs)}</Text>
+          <Text style={styles.timerLabel}>{isRecording ? "REC" : "Ready"}</Text>
         </View>
-
-        {/* Info */}
-        {lastUri ? (
-          <View style={styles.infoBox}>
-            <Ionicons name="document-text" size={16} color={COLORS.accent} />
-            <Text style={styles.infoText} numberOfLines={2}>
-              Last saved: {lastUri}
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.infoBox}>
-            <Ionicons name="information-circle" size={16} color={COLORS.accent} />
-            <Text style={styles.infoText}>
-              No recording yet. Tap record to begin.
-            </Text>
-          </View>
-        )}
+        <Animated.View style={[styles.visualizer, { opacity: waveOpacity }]}>
+          {barHeights.map((height, index) => (
+            <Animated.View
+              key={`bar-${index}`}
+              style={[styles.visualizerBar, { height }]}
+            />
+          ))}
+        </Animated.View>
 
         {/* Error */}
         {error ? (
@@ -394,7 +426,7 @@ export default function RecordScreen() {
           },
         ]}
       >
-        Tip: Record in a quiet spot for best results.
+        Tip: A quieter space can help, but it’s okay if it’s not perfect.
       </Animated.Text>
     </LinearGradient>
   );
@@ -466,11 +498,6 @@ const styles = StyleSheet.create({
     fontSize: TYPE.hero,
     fontWeight: "800",
     letterSpacing: 0.2,
-  },
-  subtitle: {
-    color: COLORS.textDim,
-    fontSize: TYPE.small,
-    marginTop: 2,
   },
 
   chip: {
@@ -590,33 +617,52 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  actionsRow: {
+  visualizerHeader: {
     marginTop: SPACING.m,
     flexDirection: "row",
-    gap: SPACING.s,
-  },
-  actionBtn: {
-    flex: 1,
-    flexDirection: "row",
-    gap: SPACING.xs,
     alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: SPACING.m,
+    justifyContent: "space-between",
+  },
+  recDot: {
+    width: 8,
+    height: 8,
+    borderRadius: RADII.round,
+  },
+  recDotLive: {
+    backgroundColor: COLORS.live,
+  },
+  recDotIdle: {
+    backgroundColor: "rgba(234,241,255,0.35)",
+  },
+  timerText: {
+    color: COLORS.text,
+    fontSize: TYPE.body,
+    fontWeight: "800",
+    letterSpacing: 1,
+  },
+  timerLabel: {
+    color: COLORS.textSoft,
+    fontSize: TYPE.small,
+    fontWeight: "700",
+    letterSpacing: 1,
+  },
+  visualizer: {
+    marginTop: SPACING.s,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    height: 58,
+    paddingHorizontal: SPACING.xs,
     borderRadius: RADII.m,
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(255,255,255,0.04)",
     borderWidth: 1,
     borderColor: COLORS.softLine,
   },
-  actionBtnPressed: {
-    opacity: 0.9,
-    transform: [{ translateY: 1 }],
+  visualizerBar: {
+    width: 3,
+    borderRadius: RADII.round,
+    backgroundColor: "rgba(234,241,255,0.85)",
   },
-  actionBtnDisabled: {
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderColor: "rgba(255,255,255,0.06)",
-  },
-  actionText: { color: COLORS.text, fontWeight: "700", fontSize: TYPE.body },
-  actionTextDisabled: { color: "#5D6A88" },
 
   infoBox: {
     marginTop: SPACING.m,
@@ -642,7 +688,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,107,107,0.32)",
   },
-  errorText: { flex: 1, color: "#FFE9E9", fontSize: TYPE.small, fontWeight: "700" },
+  errorText: {
+    flex: 1,
+    color: "#FFE9E9",
+    fontSize: TYPE.small,
+    fontWeight: "700",
+  },
 
   footer: {
     marginTop: SPACING.l,
